@@ -27,7 +27,7 @@ export function hasTone(settings: ToneSettings): boolean {
   return settings.exposure !== 0 || settings.shadows !== 0 || settings.highlights !== 0 || settings.contrast !== 0;
 }
 
-/** A common linear-light gain preserves RGB ratios; highlights cap the gain before channel clipping. */
+/** A common linear-light gain preserves RGB ratios; highlights compress the exposed peak before clipping. */
 export function applyTonePixels(input: Uint8ClampedArray, settings: ToneSettings): Uint8ClampedArray<ArrayBuffer> {
   validateTone(settings);
   if (input.length % 4 !== 0) throw new Error("Lighting requires RGBA pixels.");
@@ -35,19 +35,27 @@ export function applyTonePixels(input: Uint8ClampedArray, settings: ToneSettings
   if (!hasTone(settings)) return output;
   const exposure = 2 ** settings.exposure;
   const shadowLift = settings.shadows / 100 * 0.12;
-  const highlightReduction = settings.highlights / 100;
+  const highlightReduction = settings.highlights / 50;
   const contrast = 1 + settings.contrast / 100;
   for (let i = 0; i < input.length; i += 4) {
     const r = linear[input[i]], g = linear[input[i + 1]], b = linear[input[i + 2]];
     const luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
     let target = luma * exposure + shadowLift * Math.max(0, 1 - luma / 0.35) ** 2;
-    target -= highlightReduction * Math.max(0, target - 0.55);
-    target = clamp((target - 0.18) * contrast + 0.18, 0, 1);
+    target = Math.max(0, (target - 0.18) * contrast + 0.18);
     if (luma === 0) {
-      const value = srgb[Math.round(target * 65_535)];
+      const value = srgb[Math.round(Math.min(target, 1) * 65_535)];
       output[i] = value; output[i + 1] = value; output[i + 2] = value;
     } else {
-      const gain = Math.min(target / luma, 1 / Math.max(r, g, b));
+      const peak = Math.max(r, g, b);
+      let gain = Math.min(target / luma, 1 / peak);
+      const exposedPeak = target / luma * peak;
+      if (highlightReduction > 0 && exposedPeak > 0.30) {
+        const excess = exposedPeak - 0.30;
+        const compressedPeak = 0.30 + 0.70 * excess / (0.70 + excess);
+        // Blend from the bounded highlight-off result so raised exposure cannot create a dead slider range.
+        const basePeak = Math.min(exposedPeak, 1);
+        gain = (basePeak + highlightReduction * (compressedPeak - basePeak)) / peak;
+      }
       output[i] = srgb[Math.round(clamp(r * gain, 0, 1) * 65_535)];
       output[i + 1] = srgb[Math.round(clamp(g * gain, 0, 1) * 65_535)];
       output[i + 2] = srgb[Math.round(clamp(b * gain, 0, 1) * 65_535)];

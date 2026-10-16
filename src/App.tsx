@@ -479,7 +479,7 @@ export default function App() {
                 <div className="tone-grid">
                   <div><Slider label="Exposure (EV)" min={-1} max={1.5} step={0.05} value={toneSettings.exposure} defaultValue={0} onChange={exposure => updateTone({ ...toneSettings, exposure })} /><p className="caption">Overall brightness. Small changes are usually enough.</p></div>
                   <div><Slider label="Shadow lift" min={0} max={40} value={toneSettings.shadows} defaultValue={0} onChange={shadows => updateTone({ ...toneSettings, shadows })} /><p className="caption">Lighten dark regions without applying the same lift to highlights.</p></div>
-                  <div><Slider label="Highlight reduction" min={0} max={50} value={toneSettings.highlights} defaultValue={0} onChange={highlights => updateTone({ ...toneSettings, highlights })} /><p className="caption">Tone down bright regions. This cannot reconstruct washed-out detail.</p></div>
+                  <div><Slider label="Highlight reduction" min={0} max={50} value={toneSettings.highlights} defaultValue={0} onChange={highlights => updateTone({ ...toneSettings, highlights })} /><p className="caption">Compress bright regions, including after raising exposure. Start around 15-25 and inspect the face. A replacement background stays unchanged; detail missing from the original cannot be recovered.</p></div>
                   <div><Slider label="Contrast" min={-20} max={20} value={toneSettings.contrast} defaultValue={0} onChange={contrast => updateTone({ ...toneSettings, contrast })} /><p className="caption">Use sparingly. Excess contrast can hide facial detail.</p></div>
                 </div>
               </fieldset>
@@ -652,7 +652,7 @@ export default function App() {
         <div className="output-grid">{outputs.map(output => <OutputCard key={output.name} output={output} />)}</div>
         <button className="text-button" type="button" onClick={() => triggerDownload(new Blob([report], { type: "application/json" }), "photo-preparation-report.json")}>Download checks &amp; printing instructions (JSON)</button>
       </section>}
-      <footer><p>Local-first. No photo uploads. No government affiliation.</p><p>Version 0.6.3 &bull; <a href="/vision/model-provenance.json" target="_blank" rel="noreferrer">Local models</a> &bull; <a href="/third-party-notices.json" target="_blank" rel="noreferrer">Dependency notices</a></p></footer>
+      <footer><p>Local-first. No photo uploads. No government affiliation.</p><p>Version 0.6.4 &bull; <a href="/vision/model-provenance.json" target="_blank" rel="noreferrer">Local models</a> &bull; <a href="/third-party-notices.json" target="_blank" rel="noreferrer">Dependency notices</a></p></footer>
     </main>
   </div>;
 }

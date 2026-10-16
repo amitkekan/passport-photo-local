@@ -17,8 +17,8 @@ async function markHead(page: Page, top = 0.14, chin = 0.62) {
   await image.click({ position: { x: bounds.width / 2, y: bounds.height * chin } });
 }
 
-async function fixture(page: Page, width = 1800, height = 2200, mime = "image/png", background = "#e8e8e8", shirt = "#1d5446") {
-  const base64 = await page.evaluate(({ width, height, mime, background, shirt }) => {
+async function fixture(page: Page, width = 1800, height = 2200, mime = "image/png", background = "#e8e8e8", shirt = "#1d5446", highlightPatches = false) {
+  const base64 = await page.evaluate(({ width, height, mime, background, shirt, highlightPatches }) => {
     const canvas = document.createElement("canvas");
     canvas.width = width; canvas.height = height;
     const ctx = canvas.getContext("2d")!;
@@ -28,8 +28,12 @@ async function fixture(page: Page, width = 1800, height = 2200, mime = "image/pn
     ctx.fillStyle = "#342b24"; ctx.fillRect(width * 0.32, height * 0.14, width * 0.36, height * 0.08);
     for (const x of [0.41, 0.59]) { ctx.beginPath(); ctx.arc(width * x, height * 0.36, width * 0.016, 0, Math.PI * 2); ctx.fill(); }
     ctx.fillRect(width * 0.43, height * 0.50, width * 0.14, height * 0.009);
+    if (highlightPatches) {
+      ctx.fillStyle = "#c8c8c8"; ctx.fillRect(width * 0.44, height * 0.40, width * 0.10, height * 0.09);
+      ctx.fillStyle = "#f0f0f0"; ctx.fillRect(width * 0.54, height * 0.40, width * 0.10, height * 0.09);
+    }
     return canvas.toDataURL(mime).split(",")[1];
-  }, { width, height, mime, background, shirt });
+  }, { width, height, mime, background, shirt, highlightPatches });
   return { name: mime === "image/png" ? "synthetic-test-only.png" : "synthetic-test-only.jpg", mimeType: mime, buffer: Buffer.from(base64, "base64") };
 }
 
@@ -370,6 +374,69 @@ test("optional lighting changes preview and every exact-size export offline, wit
     databases: (await indexedDB.databases()).length,
     workers: (await navigator.serviceWorker.getRegistrations()).length,
   }))).toEqual({ local: 0, session: 0, cookies: "", databases: 0, workers: 0 });
+});
+
+test("highlight reduction remains visible with raised exposure and matches all exports without changing the original", async ({ page, context }) => {
+  await openWorkspace(page);
+  const requests: string[] = [];
+  const errors: string[] = [];
+  page.on("request", request => { if (/^https?:/.test(request.url())) requests.push(request.url()); });
+  page.on("pageerror", error => errors.push(error.message));
+  await context.setOffline(true);
+  await page.locator("#photo-upload").setInputFiles(await fixture(page, 1800, 2200, "image/png", "#e8e8e8", "#c8c8c8", true));
+  await markHead(page);
+  await page.getByRole("checkbox", { name: /I understand lighting changes/ }).check();
+  const original = await page.getByAltText("Original lighting preview", { exact: true }).getAttribute("src");
+  const preview = page.getByAltText("Adjusted lighting preview", { exact: true });
+  const samples = () => preview.evaluate((image: HTMLImageElement) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = image.naturalWidth; canvas.height = image.naturalHeight;
+    const ctx = canvas.getContext("2d")!;
+    ctx.drawImage(image, 0, 0);
+    return [0.50, 0.60].map(x => ctx.getImageData(Math.floor(canvas.width * x), Math.floor(canvas.height * 0.43), 1, 1).data[0]);
+  });
+  await page.getByRole("slider", { name: "Exposure (EV)", exact: true }).fill("1.5");
+  await page.getByRole("slider", { name: "Contrast", exact: true }).fill("20");
+  await expect.poll(samples).toEqual([255, 255]);
+  const highlights = page.getByRole("slider", { name: "Highlight reduction", exact: true });
+  await highlights.fill("25");
+  await expect.poll(async () => (await samples()).every(value => value <= 249)).toBe(true);
+  const middle = await samples();
+  await highlights.fill("50");
+  await expect.poll(async () => (await samples())[0]).toBeLessThanOrEqual(235);
+  const full = await samples();
+  expect(full[0]).toBeLessThan(full[1]);
+  expect(full.every((value, i) => value < middle[i])).toBe(true);
+  await expect(page.getByAltText("Original lighting preview", { exact: true })).toHaveAttribute("src", original!);
+  await manualReview(page);
+  await page.getByRole("button", { name: /Prepare verified-size/ }).click();
+  await expect(page.locator(".output-card")).toHaveCount(3);
+  for (const [label, width, height, x, y] of [
+    ["Download 2 x 2 photo", 1200, 1200, 0.5, 0.5],
+    ["Download portal JPEG", 630, 810, 0.5, 0.5],
+    ["Download sheet", 3000, 4200, 1.375 / 5, 1.25 / 7],
+  ] as const) {
+    const pending = page.waitForEvent("download");
+    await page.getByRole("button", { name: label, exact: true }).click();
+    const download = await pending, data = await bytes(download);
+    expect(download.suggestedFilename()).toContain("-lighting-edited.jpg");
+    expect(readHeader(data)).toEqual({ format: "jpeg", width, height });
+    if (label === "Download portal JPEG") expect(data.length).toBeLessThan(250_000);
+    const pixel = await sampleJpeg(page, data, x, y);
+    for (const channel of pixel.slice(0, 3)) expect(Math.abs(channel - full[0])).toBeLessThanOrEqual(3);
+  }
+  const reportPending = page.waitForEvent("download");
+  await page.getByRole("button", { name: /Download checks & printing instructions/ }).click();
+  const report = JSON.parse((await bytes(await reportPending)).toString("utf8"));
+  expect(report.lightingSettings).toEqual({ exposure: 1.5, shadows: 0, highlights: 50, contrast: 20 });
+  await page.getByRole("button", { name: "Reset Highlight reduction", exact: true }).click();
+  await expect(highlights).toHaveValue("0");
+  await expect.poll(samples).toEqual([255, 255]);
+  await expect(page.locator(".output-card")).toHaveCount(0);
+  await expect(page.locator(".review-list input:checked")).toHaveCount(0);
+  expect(requests).toEqual([]);
+  expect(errors).toEqual([]);
+  expect(await page.evaluate(() => ({ local: localStorage.length, session: sessionStorage.length }))).toEqual({ local: 0, session: 0 });
 });
 
 test("lighting resets are neutral and disabling, replacing or clearing a photo removes lighting state", async ({ page }) => {

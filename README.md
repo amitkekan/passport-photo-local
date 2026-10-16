@@ -53,6 +53,8 @@ The production local server binds only to loopback, serves a fixed set of build 
 
 Previews use a maximum 1400-pixel edge for responsiveness. Source-resolution checks and exports still use the full original. Processing always starts from the original, applies lighting, optionally composites the selected light background, and then creates the independent crops. Adjustments never accumulate on an already-edited image. A replacement background is therefore not darkened by lighting controls.
 
+In version 0.6.4, **Highlight reduction** uses a stronger, gradual highlight-compression curve after exposure and contrast, before channel clipping. Start at **15-25**; **50** is the strongest setting. It now affects moderately bright regions and remains useful with raised exposure. Zero retains the previous exposure/shadow/contrast behavior, including Brighten gently. The same adjustment runs in previews and every export, preserving linear RGB channel ratios. It can keep exposure adjustments from flattening existing highlight differences, but cannot recreate detail already missing from the original. Original bright backgrounds may darken; an optionally replaced white/light background stays at its selected color.
+
 ## Eye position
 
 1. Select or mark the head first. Inspect the orange eye markers, or choose **Mark both eyes** and click the center of each pupil in the original preview.

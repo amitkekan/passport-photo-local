@@ -2,6 +2,16 @@
 
 Recorded: 2026-10-15. This document preserves the reasoning, corrections and uncertainty from the planning conversation. It is not a claim that every government rule is fully verified.
 
+## D24: Make highlight reduction useful alongside exposure
+
+The owner asked why Highlight reduction barely changed the photo. Verification found correct slider/preview/export wiring, but a weak formula: subtracting up to half of luminance above 0.55 in linear light. At neutral exposure, a gray level of 200 only became 198 at maximum strength. At +1 EV, a level of 240 remained clipped to 255 whether reduction was zero or maximum. The owner then requested a fix.
+
+Version 0.6.4 retains the 0-50 UI range and neutral defaults. Compute exposure, shadow lift and contrast first, retaining the unclipped target. Derive the exposed peak RGB channel under the common linear-light gain. Above a linear peak of 0.30, use a rational curve with excess `e`: `0.30 + 0.70 * e / (0.70 + e)`. Blend between the bounded highlight-off peak and that compressed peak according to slider strength. Starting from the bounded result avoids an inactive slider range when exposure is high. Apply a common gain to preserve linear RGB ratios, then encode to sRGB.
+
+Highlight zero preserves the prior exposure/shadow/contrast outputs and Brighten gently. The curve is monotonic in both input brightness and slider strength. It preserves distinctions that added exposure would otherwise clip, but cannot infer detail absent from the source. Fully clipped equal input pixels remain equal. The optional replacement background is composited afterward, so its selected color is unchanged.
+
+Tests use synthetic ramps, color patches and recorded pre-change highlight-off reference pixels. Assert visible middle/full strength across exposure and contrast settings, ordered bright patches, preserved alpha/input, linear color ratios, shared preview/export results, reset invalidation, exact output dimensions/portal bytes, unchanged original preview and offline/no-storage behavior. Keep the change confined to opt-in lighting; it does not establish passport editing compliance.
+
 ## D23: Diagnose the actual rejection and allow tinted light walls
 
 The owner supplied an exact HEIC after the brightness fix did not resolve their case. An isolated offline reproduction showed a color rejection, not a darkness rejection. The background had low texture and low brightness variation. The previous color limits (mean channel spread 22, at most 3% of samples above spread 40) effectively demanded near-gray pixels, excluding ordinary light walls with a tint.

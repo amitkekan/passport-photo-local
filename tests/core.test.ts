@@ -336,6 +336,71 @@ test("all supported control extremes produce bounded finite pixels and preserve 
     }
 });
 
+test("highlight-off adjustments preserve the previous pixel outputs exactly", () => {
+  const input = new Uint8ClampedArray([40, 30, 20, 127, 128, 128, 128, 255, 185, 130, 87, 255, 240, 240, 240, 255, 255, 180, 90, 255, 0, 0, 0, 255]);
+  for (const [settings, expected] of [
+    [GENTLE_LIFT, [62, 48, 34, 127, 146, 146, 146, 255, 210, 148, 99, 255, 255, 255, 255, 255, 255, 180, 90, 255, 32, 32, 32, 255]],
+    [{ ...DEFAULT_TONE, exposure: 1.5, shadows: 40, contrast: 20 }, [88, 69, 50, 127, 219, 219, 219, 255, 255, 181, 123, 255, 255, 255, 255, 255, 255, 180, 90, 255, 40, 40, 40, 255]],
+    [{ ...DEFAULT_TONE, exposure: -1, shadows: 40, contrast: -20 }, [95, 75, 55, 127, 100, 100, 100, 255, 140, 97, 64, 255, 167, 167, 167, 255, 182, 127, 62, 255, 77, 77, 77, 255]],
+  ] as const) assert.deepEqual([...applyTonePixels(input, settings)], [...expected]);
+});
+
+test("highlight reduction is measurable in upper midtones and works with raised exposure and contrast", () => {
+  const gray = (value: number, highlights: number, exposure = 0, contrast = 0) =>
+    applyTonePixels(new Uint8ClampedArray([value, value, value, 255]), { ...DEFAULT_TONE, highlights, exposure, contrast })[0];
+  for (const value of [0, 40, 100, 128, 140]) assert.equal(gray(value, 50), value);
+  assert.ok(gray(200, 50) <= 190);
+  assert.ok(gray(240, 50) <= 210);
+  for (const exposure of [0, 0.4, 1, 1.5]) for (const contrast of [-20, 0, 20]) {
+    const base = gray(240, 0, exposure, contrast);
+    const middle = gray(240, 25, exposure, contrast);
+    const full = gray(240, 50, exposure, contrast);
+    assert.ok(base - middle >= 6, `Mid-slider strength is too weak at exposure ${exposure}, contrast ${contrast}`);
+    assert.ok(base - full >= 15);
+    assert.ok(full < middle && middle < base);
+    assert.ok(gray(220, 50, exposure, contrast) < full);
+    assert.ok(full < gray(255, 50, exposure, contrast));
+  }
+});
+
+test("highlight compression is monotonic across the full ramp and every slider position", () => {
+  const input = Uint8ClampedArray.from({ length: 256 * 4 }, (_, i) => i % 4 === 3 ? 127 : Math.floor(i / 4));
+  const original = input.slice();
+  for (const exposure of [-1, 0, 0.4, 1, 1.5]) for (const contrast of [-20, 0, 20]) for (const shadows of [0, 40]) {
+    let previous: Uint8ClampedArray | undefined;
+    for (let highlights = 0; highlights <= 50; highlights++) {
+      const output = applyTonePixels(input, { exposure, shadows, highlights, contrast });
+      for (let i = 0; i < output.length; i += 4) {
+        if (i) assert.ok(output[i] >= output[i - 4], "Increasing input brightness must not reverse output brightness.");
+        if (previous) assert.ok(output[i] <= previous[i], "Increasing reduction must not brighten a pixel.");
+        assert.equal(output[i + 1], output[i]);
+        assert.equal(output[i + 2], output[i]);
+        assert.equal(output[i + 3], 127);
+      }
+      previous = output;
+    }
+  }
+  assert.deepEqual(input, original);
+});
+
+test("highlight compression preserves linear color ratios without inventing clipped source detail", () => {
+  const linear = (value: number) => value / 255 <= 0.04045 ? value / 255 / 12.92 : ((value / 255 + 0.055) / 1.055) ** 2.4;
+  for (const rgb of [[240, 180, 100], [100, 190, 250], [255, 120, 80]]) {
+    const input = new Uint8ClampedArray([...rgb, 191]);
+    for (const highlights of [25, 50]) {
+      const output = applyTonePixels(input, { ...DEFAULT_TONE, exposure: 1.5, contrast: 20, highlights });
+      const inputPeak = Math.max(...rgb.map(linear));
+      const outputPeak = Math.max(...[...output.slice(0, 3)].map(linear));
+      for (let c = 0; c < 3; c++) assert.ok(Math.abs(linear(output[c]) / outputPeak - linear(rgb[c]) / inputPeak) < 0.012);
+      assert.equal(output[3], 191);
+      assert.ok(Math.max(...output.slice(0, 3)) < 255);
+    }
+  }
+  const white = new Uint8ClampedArray([255, 255, 255, 255, 255, 255, 255, 255]);
+  const result = applyTonePixels(white, { ...DEFAULT_TONE, exposure: 1.5, highlights: 50 });
+  assert.deepEqual(result.slice(0, 4), result.slice(4, 8));
+});
+
 test("invalid lighting settings and malformed pixel buffers fail explicitly", () => {
   for (const settings of [
     { ...DEFAULT_TONE, exposure: NaN }, { ...DEFAULT_TONE, exposure: Infinity },

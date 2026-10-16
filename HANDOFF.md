@@ -16,7 +16,15 @@ The owner requested moving the entire existing project to `D:\private_repos\pass
 
 This explicitly supersedes the original personal-profile location requirement. No Git repository, remote, commit or push was created. Use the new working directory below; scripts resolve project assets relative to their own location.
 
-## Latest change: version 0.6.3
+## Latest change: version 0.6.4
+
+The owner confirmed weak Highlight reduction and requested a fix after verification. `applyTonePixels` now compresses the exposed peak after contrast, before clipping, with a gradual rational curve. It blends from the bounded highlight-off result so increased exposure does not overpower the slider. Linear RGB ratios, alpha, original pixels, neutral defaults, highlight-off behavior and the optional replacement-background color are preserved. UI guidance recommends starting at 15-25 and keeps the strongest setting at 50.
+
+Final verification: **45 core tests, TypeScript/production build and all 5 focused browser scenarios passed.** Coverage includes every integer highlight setting across grayscale ramps/exposure/contrast/shadow combinations, visible middle/full strength, ordered highlight patches, color ratios, clipped-source limitations and pre-change highlight-off reference values. Browser checks verify all three export types, portal byte limits, report settings, unchanged original/replacement background, reset invalidation, mobile layout and offline/no-storage behavior. See D24 for the formula and scope.
+
+No dependencies/models were added; existing license-review flags remain. No personal photograph was required for this change.
+
+## Previous change: version 0.6.3
 
 The owner supplied a specific HEIC that still failed background correction. Reproduction established that the color guard, not the darkness guard, rejected it. Mean RGB channel spread may now reach 50, with at most 3% of samples above spread 80, supporting light cream and muted pastels while retaining a vivid-color check. Brightness, dark-patch, texture and mask-confidence rules are unchanged. New UI diagnostics expose color, texture, variation and coverage. See D23.
 

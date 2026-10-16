@@ -8,7 +8,11 @@ Help a person choose or take a suitable passport photograph, identify problems, 
 
 Core promise: one original photograph, carefully checked and prepared for digital upload and physical prints, with honest limits on what is verified.
 
-## Latest correction, version 0.6.3
+## Latest correction, version 0.6.4
+
+The owner found highlight reduction too subtle, requested verification, then explicitly requested a fix. The old control was wired correctly but acted only on very bright luminance and could be overpowered by increased exposure. Replace it with gradual peak-aware compression before clipping, applied after exposure/shadows/contrast. Make the middle and maximum slider positions visibly effective under raised exposure, without changing highlight-off behavior, neutral defaults, colors, reset behavior or the selected replacement-background color. Verify the shared preview/export path with generated bright patches and measurable pixel assertions.
+
+## Previous correction, version 0.6.3
 
 The owner supplied a specific HEIC that still failed background correction. Its rejection came from color, not brightness. Support light cream and muted pastel walls rather than effectively requiring near-gray background pixels. Show color/texture/separation diagnostics, preserve the remaining guards and verify the exact supplied input privately before declaring success. The exact HEIC now reaches the correction preview offline; no personal file or measurements are retained in the project.
 
