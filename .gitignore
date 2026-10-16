@@ -1,0 +1,103 @@
+# Dependencies, builds and local tool caches.
+node_modules/
+dist/
+.vite/
+.cache/
+*.tsbuildinfo
+
+# Test output can contain screenshots, traces and other private diagnostics.
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+coverage/
+.nyc_output/
+
+# Setup restores the model/runtime binaries; retain their pinned provenance.
+/public/vision/*
+!/public/vision/model-provenance.json
+
+# Local logs, partial downloads, temporary files and editor backups.
+logs/
+*.[lL][oO][gG]
+*.[lL][oO][gG].*
+*.local
+*.download
+*.tmp
+*.temp
+*.bak
+*.orig
+*.swp
+*.swo
+*~
+
+# Never commit real environment values or private credentials.
+.env
+.env.*
+!.env.example
+!.env.*.example
+[sS][eE][cC][rR][eE][tT][sS]/
+*.[pP][eE][mM]
+*.[kK][eE][yY]
+*.[pP]12
+*.[pP][fF][xX]
+
+# Personal photos and documents, including formats not yet accepted by the app.
+# Case-insensitive patterns also protect clones on case-sensitive systems.
+*.[jJ][pP][gG]
+*.[jJ][pP][eE][gG]
+*.[pP][nN][gG]
+*.[hH][eE][iI][cC]
+*.[hH][eE][iI][fF]
+*.[wW][eE][bB][pP]
+*.[aA][vV][iI][fF]
+*.[gG][iI][fF]
+*.[bB][mM][pP]
+*.[tT][iI][fF]
+*.[tT][iI][fF][fF]
+*.[dD][nN][gG]
+*.[rR][aA][wW]
+*.[cC][rR]2
+*.[cC][rR]3
+*.[nN][eE][fF]
+*.[aA][rR][wW]
+*.[rR][aA][fF]
+*.[pP][dD][fF]
+
+# Photo-editing sidecars, Live Photo videos and screen recordings.
+*.[aA][aA][eE]
+*.[xX][mM][pP]
+*.[mM][oO][vV]
+*.[mM][pP]4
+*.[wW][eE][bB][mM]
+
+# Archives can conceal photos, reports or credentials.
+*.[zZ][iI][pP]
+*.7[zZ]
+*.[rR][aA][rR]
+*.[tT][aA][rR]
+*.[gG][zZ]
+*.[tT][gG][zZ]
+
+# Personal work folders and app-generated preparation reports.
+[pP][hH][oO][tT][oO][sS]/
+[oO][rR][iI][gG][iI][nN][aA][lL][sS]/
+[uU][pP][lL][oO][aA][dD][sS]/
+[eE][xX][pP][oO][rR][tT][sS]/
+[dD][oO][wW][nN][lL][oO][aA][dD][sS]/
+[rR][eE][pP][oO][rR][tT][sS]/
+private-diagnostics/
+[pP][hH][oO][tT][oO]-[pP][rR][eE][pP][aA][rR][aA][tT][iI][oO][nN]-[rR][eE][pP][oO][rR][tT]*.[jJ][sS][oO][nN]
+
+# Only these reviewed upstream graphic fixtures are allowed, never whole folders.
+!/tests/fixtures/rainbow-451x461.heic
+!/tests/fixtures/with-alpha-512x512.heic
+
+# Machine-local editor state and operating-system metadata.
+.history/
+*.code-workspace
+.vscode/*.local.json
+.DS_Store
+._*
+Thumbs.db
+[dD]esktop.ini

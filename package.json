@@ -1,0 +1,37 @@
+{
+  "name": "passport-photo-local",
+  "version": "0.6.3",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 4317 --strictPort",
+    "build": "tsc --noEmit && vite build",
+    "start": "node tools/serve.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/core.test.ts",
+    "test:e2e": "playwright test",
+    "licenses": "node tools/licenses.mjs",
+    "setup:vision": "node tools/setup-vision.mjs"
+  },
+  "dependencies": {
+    "@mediapipe/tasks-vision": "0.10.21",
+    "heic-to": "1.6.5",
+    "onnxruntime-web": "1.22.0",
+    "react": "19.1.0",
+    "react-dom": "19.1.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.55.1",
+    "@types/node": "22.17.0",
+    "@types/react": "19.2.7",
+    "@types/react-dom": "19.1.1",
+    "@vitejs/plugin-react": "4.3.4",
+    "tsx": "4.19.3",
+    "typescript": "5.8.3",
+    "vite": "6.4.1"
+  },
+  "engines": {
+    "node": ">=22.6.0"
+  }
+}
