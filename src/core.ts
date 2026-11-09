@@ -254,7 +254,7 @@ export function isSheetPreset(value: string): value is SheetPreset {
 }
 
 export function sheetLayout(ppi: Ppi, preset: SheetPreset, format: PrintFormat = "2x2"): {
-  width: number; height: number; photos: Rect[]; guides: CutGuide[]; guideWidth: number;
+  width: number; height: number; photos: Rect[]; guides: CutGuide[]; guideWidth: number; guideDash: [number, number];
 } {
   if ((ppi !== 300 && ppi !== 600) || !isSheetPreset(preset)) throw new Error("Unsupported print-sheet settings.");
   const spec = SHEET_PRESETS[preset];
@@ -276,21 +276,20 @@ export function sheetLayout(ppi: Ppi, preset: SheetPreset, format: PrintFormat =
     }
   }
   const guides: CutGuide[] = [];
-  // Each mark sits in waste paper, separated from the photo by 0.03 inches.
+  const guideWidth = ppi / 100;
+  // Edge-to-edge dotted lines on every cut. Each stroke lies on the waste side with its inner edge
+  // exactly on the photo edge, so no ink touches a photo. Grid alignment keeps lines out of other photos.
   if (spec.gap > 0) {
-    const offset = 0.03 * ppi, length = 0.08 * ppi;
+    const half = guideWidth / 2;
+    const xs = new Set<number>(), ys = new Set<number>();
     for (const photo of photos) {
-      for (const x of [photo.x, photo.x + photo.width]) {
-        guides.push({ x1: x, x2: x, y1: photo.y - offset - length, y2: photo.y - offset });
-        guides.push({ x1: x, x2: x, y1: photo.y + photo.height + offset, y2: photo.y + photo.height + offset + length });
-      }
-      for (const y of [photo.y, photo.y + photo.height]) {
-        guides.push({ x1: photo.x - offset - length, x2: photo.x - offset, y1: y, y2: y });
-        guides.push({ x1: photo.x + photo.width + offset, x2: photo.x + photo.width + offset + length, y1: y, y2: y });
-      }
+      xs.add(photo.x - half); xs.add(photo.x + photo.width + half);
+      ys.add(photo.y - half); ys.add(photo.y + photo.height + half);
     }
+    for (const x of [...xs].sort((a, b) => a - b)) guides.push({ x1: x, x2: x, y1: 0, y2: height });
+    for (const y of [...ys].sort((a, b) => a - b)) guides.push({ x1: 0, x2: width, y1: y, y2: y });
   }
-  return { width, height, photos, guides, guideWidth: ppi / 200 };
+  return { width, height, photos, guides, guideWidth, guideDash: [ppi * 4 / 100, ppi * 3 / 100] };
 }
 
 export function analyzePixels(data: Uint8ClampedArray, width: number, height: number): Quality {

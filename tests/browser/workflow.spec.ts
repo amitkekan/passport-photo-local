@@ -199,7 +199,9 @@ test("standard sheets print both photo formats at both densities with visible gu
           faces: layout.photos.map(p => sample(p.x + p.width / 2, p.y + p.height / 2)),
           gaps: layout.photos.map(p => sample(p.x + p.width / 2, p.y - ppi * 0.125)),
           guides: layout.guides.map(g => {
-            const values = ctx.getImageData(Math.floor((g.x1 + g.x2) / 2) - 1, Math.floor((g.y1 + g.y2) / 2) - 1, 3, 3).data;
+            const along = layout.guideDash[0] / 2;
+            const x = g.x1 === g.x2 ? g.x1 : g.x1 + along, y = g.y1 === g.y2 ? g.y1 : g.y1 + along;
+            const values = ctx.getImageData(Math.floor(x) - 1, Math.floor(y) - 1, 3, 3).data;
             let darkest = 255;
             for (let i = 0; i < values.length; i += 4) darkest = Math.min(darkest, (values[i] + values[i + 1] + values[i + 2]) / 3);
             return darkest;
@@ -240,7 +242,7 @@ test("standard sheets print both photo formats at both densities with visible gu
   const cleanSheet = await cleanSheetPending;
   expect(cleanSheet.suggestedFilename()).not.toContain("-cut-guides");
   const layout = sheetLayout(600, "5x7", "35x45"), g = layout.guides[0];
-  const pixel = await sampleJpeg(page, await bytes(cleanSheet), (g.x1 + g.x2) / 2 / layout.width, (g.y1 + g.y2) / 2 / layout.height);
+  const pixel = await sampleJpeg(page, await bytes(cleanSheet), g.x1 / layout.width, layout.guideDash[0] / 2 / layout.height);
   expect(pixel.slice(0, 3).every(value => value >= 250)).toBe(true);
   expect(requests).toEqual([]);
 });

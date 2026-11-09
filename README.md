@@ -122,7 +122,7 @@ Choose the paper size in **Print sheet size and layout**, and order that exact s
 | 4 x 6 inches | 2 | 4 |
 | 5 x 7 inches (default) | 6 | 6 |
 
-All layouts have 0.25-inch white gaps and outer margins. Cutting guides are on by default and appear only in waste paper, never over a finished photo. Align a straightedge through matching short marks and trim away the surrounding paper and gaps. Disable the guide checkbox for a clean sheet. Changing sheet size or guides clears old exports and confirmations.
+All layouts have 0.25-inch white gaps and outer margins. Cutting guides are on by default and appear only in waste paper, never over a finished photo. Align a straightedge along each edge-to-edge dotted line and cut on its photo side (the dots sit just outside each photo), then trim away the surrounding paper and gaps. Disable the guide checkbox for a clean sheet. Changing sheet size or guides clears old exports and confirmations.
 
 The sheet is larger; the individual photos are not enlarged. Do not order the individual photo as a 4 x 6 or 5 x 7 print. Margins cannot correct a lab's automatic enlargement. Verify a cut photo with a ruler and use appropriate photo paper.
 

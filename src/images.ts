@@ -143,9 +143,11 @@ export async function createOutputs(
   for (const rect of layout.photos) ctx.drawImage(print, rect.x, rect.y, rect.width, rect.height);
   if (cutGuides) {
     ctx.strokeStyle = "#111827"; ctx.lineWidth = layout.guideWidth; ctx.lineCap = "butt";
+    ctx.setLineDash(layout.guideDash); ctx.lineDashOffset = 0;
     ctx.beginPath();
     for (const guide of layout.guides) { ctx.moveTo(guide.x1, guide.y1); ctx.lineTo(guide.x2, guide.y2); }
     ctx.stroke();
+    ctx.setLineDash([]);
   }
   const outputs: Output[] = [];
   for (const [canvas, name, printSize] of [

@@ -467,19 +467,32 @@ test("standard sheets have exact size, separate print rectangles and guides enti
         assert.ok(a.x + a.width + gap <= b.x || b.x + b.width + gap <= a.x || a.y + a.height + gap <= b.y || b.y + b.height + gap <= a.y);
       }
     }
-    assert.equal(layout.guides.length, layout.photos.length * 8);
+    const columns = format === "35x45" ? 2 : spec.columns;
+    assert.equal(layout.guides.length, columns * 2 + spec.rows * 2);
+    assert.equal(layout.guideWidth / ppi, 0.01);
+    assert.deepEqual(layout.guideDash.map(value => value / ppi), [0.04, 0.03]);
     for (const guide of layout.guides) {
       const half = layout.guideWidth / 2;
-      const left = Math.min(guide.x1, guide.x2) - half, right = Math.max(guide.x1, guide.x2) + half;
-      const top = Math.min(guide.y1, guide.y2) - half, bottom = Math.max(guide.y1, guide.y2) + half;
+      const left = Math.min(guide.x1, guide.x2) - (guide.x1 === guide.x2 ? half : 0);
+      const right = Math.max(guide.x1, guide.x2) + (guide.x1 === guide.x2 ? half : 0);
+      const top = Math.min(guide.y1, guide.y2) - (guide.y1 === guide.y2 ? half : 0);
+      const bottom = Math.max(guide.y1, guide.y2) + (guide.y1 === guide.y2 ? half : 0);
       assert.ok(left >= 0 && top >= 0 && right <= layout.width && bottom <= layout.height);
-      assert.ok(Math.abs(Math.hypot(guide.x2 - guide.x1, guide.y2 - guide.y1) / ppi - 0.08) < 1e-9);
+      if (guide.x1 === guide.x2) assert.ok(top === 0 && bottom === layout.height);
+      else assert.ok(left === 0 && right === layout.width);
       for (const photo of layout.photos) {
-        assert.ok(right < photo.x || left > photo.x + photo.width || bottom < photo.y || top > photo.y + photo.height);
+        assert.ok(right <= photo.x || left >= photo.x + photo.width || bottom <= photo.y || top >= photo.y + photo.height);
       }
       assert.ok(layout.photos.some(photo => guide.x1 === guide.x2 ?
-        guide.x1 === photo.x || guide.x1 === photo.x + photo.width :
-        guide.y1 === photo.y || guide.y1 === photo.y + photo.height));
+        right === photo.x || left === photo.x + photo.width :
+        bottom === photo.y || top === photo.y + photo.height));
+    }
+    for (const photo of layout.photos) {
+      const vertical = layout.guides.filter(g => g.x1 === g.x2), horizontal = layout.guides.filter(g => g.y1 === g.y2);
+      assert.ok(vertical.some(g => g.x1 + layout.guideWidth / 2 === photo.x));
+      assert.ok(vertical.some(g => g.x1 - layout.guideWidth / 2 === photo.x + photo.width));
+      assert.ok(horizontal.some(g => g.y1 + layout.guideWidth / 2 === photo.y));
+      assert.ok(horizontal.some(g => g.y1 - layout.guideWidth / 2 === photo.y + photo.height));
     }
   }
 });

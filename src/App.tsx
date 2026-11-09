@@ -388,7 +388,7 @@ export default function App() {
         outputFiles: files.map(({ name, width, height, blob, printSize }) => ({ name, width, height, bytes: blob.size, printSize })),
         sheet: { preset: sheetPreset, widthInches: sheetSpec.width, heightInches: sheetSpec.height,
           photoCount: layout.photos.length, photoSize: printSpec.label, gapInches: sheetSpec.gap, cuttingGuides: hasCutGuides },
-        printInstructions: `Select ${sheetSpec.width} x ${sheetSpec.height} inches for the sheet, actual size / 100%, no fit-to-page, no auto enhancement, no cropping or borderless expansion. Photos have white gaps and outer margins. ${hasCutGuides ? `Align cuts through the outside crop marks; remove waste paper, leaving ${printSpec.label} photos with no printed guides.` : "No cutting guides included."} Do not enlarge the individual photo to fill larger paper. Metric dimensions are rounded to the nearest whole pixel. Verify a cut photo with a ruler. Use photo paper.`,
+        printInstructions: `Select ${sheetSpec.width} x ${sheetSpec.height} inches for the sheet, actual size / 100%, no fit-to-page, no auto enhancement, no cropping or borderless expansion. Photos have white gaps and outer margins. ${hasCutGuides ? `Cut along the photo side of each edge-to-edge dotted line; remove waste paper, leaving ${printSpec.label} photos with no printed guides.` : "No cutting guides included."} Do not enlarge the individual photo to fill larger paper. Metric dimensions are rounded to the nearest whole pixel. Verify a cut photo with a ruler. Use photo paper.`,
         limitations: ["Adults only", "Face detection and head extent are estimates; eyes, expression and pose need review", "Quality thresholds are engineering heuristics, not government thresholds", "No proof of recency, originality or identity", "Physical-copy count must be checked against your current checklist", "No HEIC sequences or US online-renewal profile", "HEIC HDR, depth, auxiliary images and original metadata are not preserved; inspect decoded orientation and color"],
         sources: country === "india" ? [SOURCES.indiaPrint, SOURCES.indiaUpload] : country === "usa" ? [SOURCES.usa] : [],
       };
@@ -622,7 +622,7 @@ export default function App() {
                 </select>
                 <label className="checkbox"><input type="checkbox" checked={hasCutGuides}
                   onChange={event => { setShowCutGuides(event.target.checked); resetReview(); }} />Include cutting guides outside the photos</label>
-                <p className="caption">Each photo is {printSpec.label}{printFormat === "35x45" ? ", to whole-pixel precision" : ""}. White gaps are 0.25 inch. Guides sit only in waste paper, never over the photos. Cut along the alignment of the short marks, not around the larger sheet.</p>
+                <p className="caption">Each photo is {printSpec.label}{printFormat === "35x45" ? ", to whole-pixel precision" : ""}. White gaps are 0.25 inch. Guides sit only in waste paper, never over the photos. Dotted lines run edge to edge along every cut; cut along the photo side of each dotted line.</p>
                 <div className="notice">Order exactly <strong>{sheetSpec.width} x {sheetSpec.height} inches</strong>, actual size / 100%. Disable auto-enhancement, cropping and borderless expansion. Do not order the individual photo as a larger print. Measure a cut photo with a ruler. Margins do not compensate for a lab enlarging the sheet.</div>
               </div>
               <div className="review-list">

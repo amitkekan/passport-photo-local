@@ -1,6 +1,6 @@
 # Handoff for another session or agent
 
-Last updated: 2026-10-15.
+Last updated: 2026-11-09.
 
 ## Root ignore-rule review
 
@@ -16,7 +16,13 @@ The owner requested moving the entire existing project to `D:\private_repos\pass
 
 This explicitly supersedes the original personal-profile location requirement. No Git repository, remote, commit or push was created. Use the new working directory below; scripts resolve project assets relative to their own location.
 
-## Latest change: version 0.6.4
+## Latest change: edge-to-edge dotted cutting lines
+
+The owner requested end-to-end dotted cutting lines. `sheetLayout` now emits one full-sheet dotted line per unique photo-edge coordinate (0.01-inch stroke, 0.04/0.03-inch dash pattern exposed as `guideDash`) instead of eight short marks per photo. Each stroke's inner edge sits exactly on the photo edge, on the waste side, so no ink enters a photo; grid alignment keeps lines out of other photos. UI caption and printing instructions now say to cut on the photo side of each dotted line. See D25.
+
+Verification: 45 core tests, TypeScript/production build and the 3 sheet/download/mobile browser scenarios passed. Tests check full-span lines, flush waste-side placement for every photo edge, no photo overlap, dash visibility in exports and clean sheets when guides are disabled. A synthetic gray-rectangle sheet was visually inspected. No dependency changes.
+
+## Previous change: version 0.6.4
 
 The owner confirmed weak Highlight reduction and requested a fix after verification. `applyTonePixels` now compresses the exposed peak after contrast, before clipping, with a gradual rational curve. It blends from the bounded highlight-off result so increased exposure does not overpower the slider. Linear RGB ratios, alpha, original pixels, neutral defaults, highlight-off behavior and the optional replacement-background color are preserved. UI guidance recommends starting at 15-25 and keeps the strongest setting at 50.
 
@@ -117,7 +123,7 @@ Current choices:
 | 2 x 2 inches (U.S./India profiles) | 2 copies | 6 copies |
 | 35 x 45 mm (generic print-only profile) | 4 copies | 6 copies |
 
-All layouts have 0.25-inch gaps and outer margins. Cutting marks are enabled by default, appear only in waste paper and can be disabled. The original 4 x 7 options no longer exist. This explicitly supersedes earlier requirements and historical descriptions below.
+All layouts have 0.25-inch gaps and outer margins. Cutting marks are enabled by default, appear only in waste paper and can be disabled (now edge-to-edge dotted lines; see D25). The original 4 x 7 options no longer exist. This explicitly supersedes earlier requirements and historical descriptions below.
 
 Implementation:
 

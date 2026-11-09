@@ -2,6 +2,10 @@
 
 Recorded: 2026-10-15. This document preserves the reasoning, corrections and uncertainty from the planning conversation. It is not a claim that every government rule is fully verified.
 
+## D25: Edge-to-edge dotted cutting lines
+
+The owner requested end-to-end dotted lines for easier cutting, replacing D14's short corner marks (0.03-inch offset, 0.08-inch length, 0.005-inch stroke). Each unique photo-edge coordinate now gets one dotted line spanning the full sheet: 0.01-inch stroke, 0.04-inch dashes and 0.03-inch spaces. The stroke sits on the waste side with its inner edge exactly on the photo edge, so cutting along the photo side of the dots gives the exact photo size and no ink enters any photo rectangle. Because photos form an aligned grid with 0.25-inch gaps, lines cross only margins and gaps, never another photo. Lines remain optional, enabled by default, sheet-only, and absent from individual photos and portal uploads. Photo sizes, gaps and margins are unchanged.
+
 ## D24: Make highlight reduction useful alongside exposure
 
 The owner asked why Highlight reduction barely changed the photo. Verification found correct slider/preview/export wiring, but a weak formula: subtracting up to half of luminance above 0.55 in linear light. At neutral exposure, a gray level of 200 only became 198 at maximum strength. At +1 EV, a level of 240 remained clipped to 255 whether reduction was zero or maximum. The owner then requested a fix.
@@ -307,7 +311,7 @@ No new dependencies, hosted processing, photo persistence or release-license cle
 
 The owner reported missing cutting margins in downloaded sheets. The renderer previously drew photographs on white paper without crop marks, so white photo backgrounds blended into the paper. Six 2-inch photos also filled the original 4-inch-wide sheet without side margins.
 
-The owner explicitly rejected 4 x 7 as nonstandard and requested standard sizes, superseding the original instruction to retain 4 x 7. Offer 5 x 7 by default and 4 x 6 as an alternative. Every layout uses 0.25-inch gaps and outer white margins. Optional dark crop marks are enabled by default, with 0.03-inch separation from photo edges, 0.08-inch length and 0.005-inch stroke width. The full ink footprint must stay outside every photo and inside the paper.
+The owner explicitly rejected 4 x 7 as nonstandard and requested standard sizes, superseding the original instruction to retain 4 x 7. Offer 5 x 7 by default and 4 x 6 as an alternative. Every layout uses 0.25-inch gaps and outer white margins. Optional dark crop marks are enabled by default, with 0.03-inch separation from photo edges, 0.08-inch length and 0.005-inch stroke width (superseded by D25's edge-to-edge dotted lines). The full ink footprint must stay outside every photo and inside the paper.
 
 - 2 x 2 inches: six copies on 5 x 7, two on 4 x 6.
 - 35 x 45 mm: six copies on 5 x 7, four on 4 x 6. These intentionally leave comfortable cutting margins rather than maximizing packing density.

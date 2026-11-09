@@ -129,7 +129,7 @@ The owner also requested 35 x 45 mm printing for other countries. Provide a gene
 - Standard 4 x 6 inches: 2400 x 3600 pixels at 600 PPI, 1200 x 1800 at 300 PPI.
 - 2 x 2 inch photos: six on 5 x 7, two on 4 x 6.
 - 35 x 45 mm photos: six on 5 x 7, four on 4 x 6.
-- Every layout has 0.25-inch white gaps and outer margins, with short cutting marks outside the photos. Marks are enabled by default and can be disabled. No border is drawn over a finished photo.
+- Every layout has 0.25-inch white gaps and outer margins, with edge-to-edge dotted cutting lines just outside the photos (D25). Lines are enabled by default and can be disabled. No border is drawn over a finished photo.
 - The original 4 x 7 layouts are removed at the owner's request; this is an explicit requirement change, not a silent substitution.
 - Instruct the user to select actual size / 100%, no fit-to-page, no automatic cropping, no enhancement and no borderless enlargement.
 - Order the selected sheet size. Correct file geometry and margins cannot compensate for printer or lab scaling.
