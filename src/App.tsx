@@ -4,14 +4,18 @@ import {
   type ApplicationProfile, type Face, type Frame, type MatteSettings, type Ppi, type Quality, type Rect, type SheetPreset, type PrintFormat,
 } from "./core";
 import {
-  analyzePhoto, assessBackground, context, createOutputs, loadPhoto, renderAdjustments, thumbnail, triggerDownload,
+  analyzePhoto, assessBackground, context, createOutputs, loadPhoto, renderAdjustments, straightenCanvas, thumbnail, triggerDownload,
   type Output, type Photo,
 } from "./images";
 import { detectFaces, initializeVision, portraitMatte, type PortraitMatte } from "./vision";
 import FaceSelector from "./FaceSelector";
 import { DEFAULT_TONE, GENTLE_LIFT, hasTone, type ToneSettings } from "./tone";
 import { BACKGROUND_COLORS, BACKGROUND_COLOR_LIMITS, type BackgroundColor, type BackgroundAssessment } from "./background";
-import { eyeMeasurements, eyesWithinTarget, validEyeTarget, type Eyes, type EyeTarget } from "./eyes";
+import { eyeMeasurements, eyesWithinTarget, validEyeTarget, type Eyes, type EyeTarget, type Point } from "./eyes";
+import {
+  estimatePose, eyeLineDegrees, fromStraightened, mapEyes, MAX_STRAIGHTEN_DEGREES, POSE_LIMITS, straightenBounds, straightening, toStraightened, validStraightenDegrees,
+  type Straightening,
+} from "./pose";
 
 type Guides = { top: number; chin: number };
 type Review = { appearance: boolean; framing: boolean; original: boolean; printing: boolean; edited: boolean; countryRules: boolean; eyes: boolean };
@@ -24,6 +28,14 @@ const SOURCES = {
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : "An unexpected processing error occurred. No files were generated. Try a different original photograph.";
+}
+
+type SourceHint = { face: Face | null; eyes: Eyes | null };
+
+function mapRect(rect: Rect, map: (point: Point) => Point, width: number, height: number): Rect {
+  const center = map({ x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 });
+  const w = Math.min(rect.width, width), h = Math.min(rect.height, height);
+  return { x: Math.max(0, Math.min(width - w, center.x - w / 2)), y: Math.max(0, Math.min(height - h, center.y - h / 2)), width: w, height: h };
 }
 
 function Slider({ label, value, min, max, step = 1, onChange, defaultValue }: {
@@ -147,6 +159,9 @@ export default function App() {
   const [visionError, setVisionError] = useState("");
   const [country, setCountry] = useState<ApplicationProfile>("india");
   const [photo, setPhoto] = useState<Photo | null>(null);
+  const [straightened, setStraightened] = useState<{ photo: Photo; geometry: Straightening; edgeFilledPixels: number; maxEdgeExtension: number } | null>(null);
+  const [straightenConsent, setStraightenConsent] = useState(false);
+  const [straightenDegrees, setStraightenDegrees] = useState(0);
   const [backgroundEnabled, setBackgroundEnabled] = useState(false);
   const [toneConsent, setToneConsent] = useState(false);
   const [toneSettings, setToneSettings] = useState<ToneSettings>({ ...DEFAULT_TONE });
@@ -186,15 +201,21 @@ export default function App() {
   const printFormat: PrintFormat = country === "generic35x45" ? "35x45" : "2x2";
   const printSpec = PRINT_FORMATS[printFormat];
   const printPixels = printDimensions(printFormat, ppi);
-  const defaults = useMemo(() => photo ? suggestFraming(photo.canvas.width, photo.canvas.height, selectedFace, printFormat) :
-    suggestFraming(1200, 1600, null, printFormat), [photo, selectedFace, printFormat]);
-  const source = photo?.canvas;
+  const active = straightened?.photo ?? photo;
+  const defaults = useMemo(() => active ? suggestFraming(active.canvas.width, active.canvas.height, selectedFace, printFormat) :
+    suggestFraming(1200, 1600, null, printFormat), [active, selectedFace, printFormat]);
+  const source = active?.canvas;
   const sheetSpec = SHEET_PRESETS[sheetPreset];
   const layout = sheetLayout(ppi, sheetPreset, printFormat);
   const hasCutGuides = showCutGuides;
   const activeTone = toneConsent ? toneSettings : DEFAULT_TONE;
   const lightingEdited = toneConsent && hasTone(toneSettings);
-  const isEdited = backgroundEnabled || lightingEdited;
+  const isEdited = backgroundEnabled || lightingEdited || !!straightened;
+  const originalTilt = eyes ? (straightened?.geometry.degrees ?? 0) + eyeLineDegrees(eyes) : null;
+  const suggestedStraighten = originalTilt === null ? 0 :
+    Math.round(Math.max(-MAX_STRAIGHTEN_DEGREES, Math.min(MAX_STRAIGHTEN_DEGREES, originalTilt)) * 10) / 10;
+  const pose = selectedFace?.landmarks ? estimatePose(selectedFace.landmarks) : null;
+  const unmodifiedLabel = straightened ? "Straightened, no lighting or background edits" : "Original, unchanged";
   const previewSettings = useMemo(() => ({ tone: activeTone, matte: backgroundEnabled ? matte : null, matteSettings, backgroundColor }),
     [activeTone, backgroundEnabled, matte, matteSettings, backgroundColor]);
   const deferredPreview = useDeferredValue(previewSettings);
@@ -245,6 +266,7 @@ export default function App() {
     setEyes(null); setTargetEnabled(false); setTargetMin(""); setTargetMax("");
     setFaces([]); setSelectedFace(null); setMatte(null); setMatteSettings({ ...DEFAULT_MATTE });
     setPpi(600); setSheetPreset("5x7"); setShowCutGuides(true);
+    setStraightened(null); setStraightenConsent(false); setStraightenDegrees(0);
   }
   function selectFace(face: Face) {
     if (!photo) return;
@@ -260,6 +282,8 @@ export default function App() {
     setWallConfirmed(false); setBackgroundColor("white"); setBackgroundAssessment(null);
     setEyes(selectedFace?.eyes ?? null); setTargetEnabled(false); setTargetMin(""); setTargetMax("");
     setMatteSettings({ ...DEFAULT_MATTE }); resetReview();
+    setStraightenConsent(false); setStraightenDegrees(0);
+    if (straightened) void removeStraightening(false);
   }
   function changePrintFrame(next: Frame) {
     if (!source || !printRect) return;
@@ -292,53 +316,112 @@ export default function App() {
     if (source && printRect) setGuides(reprojectGuides(printRect, cropRect(source.width, source.height, pixels.width / pixels.height, printFrame), guides));
     setPpi(next); resetReview();
   }
+  async function analyzeSource(target: Photo, hint: SourceHint | null) {
+    const { width, height } = target.canvas;
+    setQuality(analyzePhoto(target.canvas)); setMatte(null); setFramingNotice("");
+    let detected: Face[] = [];
+    if (visionState === "ready") {
+      setBusy("Finding faces locally and suggesting the required crops...");
+      await new Promise<void>(resolve => setTimeout(resolve, 0));
+      detected = detectFaces(target.canvas);
+      if (detected.length) {
+        setBusy("Checking the visible head boundary locally for portal framing...");
+        try {
+          const mask = await portraitMatte(target.canvas);
+          setMatte(mask);
+          detected = detected.map(face => {
+            const head = refinePortalHead(face, width, height, mask);
+            return head ? { ...face, portalHead: head } : face;
+          });
+          if (detected.some(face => !face.portalHead)) {
+            setFramingNotice("The visible crown could not be estimated confidently for every face. Check the portal head guides and mark the head manually if needed.");
+          }
+        } catch (cause) {
+          setFramingNotice(`Automatic crown refinement was unavailable: ${message(cause)} The detector-based crop is only a starting estimate; mark the head manually.`);
+        }
+      }
+    }
+    setFaces(detected);
+    let selected = detected.length === 1 ? detected[0] : null;
+    if (hint?.face?.source === "manual") selected = hint.face;
+    else if (hint?.face) {
+      const box = hint.face.bounds, cx = box.x + box.width / 2, cy = box.y + box.height / 2;
+      const nearest = detected.map(face => ({ face, distance: Math.hypot(face.bounds.x + face.bounds.width / 2 - cx, face.bounds.y + face.bounds.height / 2 - cy) }))
+        .sort((a, b) => a.distance - b.distance)[0];
+      if (nearest && nearest.distance < box.width / 2) selected = nearest.face;
+    }
+    setSelectedFace(selected);
+    setEyes(hint?.eyes?.source === "manual" ? hint.eyes : selected?.eyes ?? hint?.eyes ?? null);
+    const next = suggestFraming(width, height, selected, printFormat);
+    if (visionState === "ready" || selected) {
+      setPrintFrame(next.print); setPortalFrame(next.portal); setGuides(next.guides);
+    }
+    setPpi(next.ppi);
+  }
+  function sourceHint(map: (point: Point) => Point, width: number, height: number, keepEyes: boolean): SourceHint {
+    const face = selectedFace ? { ...selectedFace, bounds: mapRect(selectedFace.bounds, map, width, height),
+      head: mapRect(selectedFace.head, map, width, height), portalHead: undefined, eyes: undefined, landmarks: undefined } : null;
+    return { face, eyes: keepEyes && eyes ? mapEyes(eyes, map) : null };
+  }
+  function clearSourceEdits() {
+    // A new source needs a new portrait mask, so any background correction must be checked again.
+    setBackgroundEnabled(false); setBackgroundAssessment(null); resetReview();
+  }
+  async function applyStraightening() {
+    if (!photo || !straightenConsent) return;
+    if (!validStraightenDegrees(straightenDegrees) || straightenDegrees === 0) {
+      setError(`Choose a non-zero straightening angle up to ${MAX_STRAIGHTEN_DEGREES} degrees.`); return;
+    }
+    if (!selectedFace || !eyes) { setError("Select or mark the head and both eyes before straightening the head."); return; }
+    clearSourceEdits(); setBusy("Straightening the head in the full-resolution original locally...");
+    try {
+      await new Promise<void>(resolve => setTimeout(resolve, 0));
+      const previous = straightened?.geometry;
+      const toOriginal = (point: Point) => previous ? fromStraightened(point, previous) : point;
+      const { width, height } = photo.canvas;
+      const current = selectedFace.portalHead ? {
+        x: Math.min(selectedFace.head.x, selectedFace.portalHead.x), y: Math.min(selectedFace.head.y, selectedFace.portalHead.y),
+        width: Math.max(selectedFace.head.x + selectedFace.head.width, selectedFace.portalHead.x + selectedFace.portalHead.width) - Math.min(selectedFace.head.x, selectedFace.portalHead.x),
+        height: Math.max(selectedFace.head.y + selectedFace.head.height, selectedFace.portalHead.y + selectedFace.portalHead.height) - Math.min(selectedFace.head.y, selectedFace.portalHead.y),
+      } : selectedFace.head;
+      const geometry = straightening(width, height, mapRect(current, toOriginal, width, height), mapEyes(eyes, toOriginal), straightenDegrees);
+      const { canvas, edgeFilledPixels, maxEdgeExtension } = straightenCanvas(photo.canvas, geometry);
+      const next: Photo = { ...photo, canvas, preview: thumbnail(canvas).toDataURL("image/jpeg", 0.9) };
+      const hint = sourceHint(point => toStraightened(toOriginal(point), geometry), width, height, true);
+      setStraightened({ photo: next, geometry, edgeFilledPixels, maxEdgeExtension });
+      await analyzeSource(next, hint);
+    } catch (cause) { setError(message(cause)); }
+    finally { setBusy(""); }
+  }
+  async function removeStraightening(keepEyes = true) {
+    if (!photo || !straightened) return;
+    const geometry = straightened.geometry;
+    clearSourceEdits(); setBusy("Restoring the unrotated original...");
+    try {
+      const hint = sourceHint(point => fromStraightened(point, geometry), photo.canvas.width, photo.canvas.height, keepEyes);
+      setStraightened(null);
+      await analyzeSource(photo, hint);
+    } catch (cause) { setError(message(cause)); }
+    finally { setBusy(""); }
+  }
   async function upload(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
     clearPhoto(); setBusy("Reading your original and measuring image quality...");
     try {
       const loaded = await loadPhoto(file);
-      const measured = analyzePhoto(loaded.canvas);
-      setPhoto(loaded); setQuality(measured);
-      if (visionState === "ready") {
-        setBusy("Finding faces locally and suggesting the required crops...");
-        await new Promise<void>(resolve => setTimeout(resolve, 0));
-        let detected = detectFaces(loaded.canvas);
-        if (detected.length) {
-          setBusy("Checking the visible head boundary locally for portal framing...");
-          try {
-            const mask = await portraitMatte(loaded.canvas);
-            setMatte(mask);
-            detected = detected.map(face => {
-              const head = refinePortalHead(face, loaded.canvas.width, loaded.canvas.height, mask);
-              return head ? { ...face, portalHead: head } : face;
-            });
-            if (detected.some(face => !face.portalHead)) {
-              setFramingNotice("The visible crown could not be estimated confidently for every face. Check the portal head guides and mark the head manually if needed.");
-            }
-          } catch (cause) {
-            setFramingNotice(`Automatic crown refinement was unavailable: ${message(cause)} The detector-based crop is only a starting estimate; mark the head manually.`);
-          }
-        }
-        setFaces(detected);
-        const selected = detected.length === 1 ? detected[0] : null;
-        setSelectedFace(selected);
-        setEyes(selected?.eyes ?? null);
-        const next = suggestFraming(loaded.canvas.width, loaded.canvas.height, selected, printFormat);
-        setPrintFrame(next.print); setPortalFrame(next.portal); setGuides(next.guides); setPpi(next.ppi);
-      } else {
-        setPpi(suggestFraming(loaded.canvas.width, loaded.canvas.height, null, printFormat).ppi);
-      }
+      setPhoto(loaded);
+      await analyzeSource(loaded, null);
     } catch (cause) { setError(message(cause)); }
     finally { setBusy(""); }
   }
   async function editBackground() {
-    if (!photo || !editConsent || !wallConfirmed) return;
+    if (!source || !editConsent || !wallConfirmed) return;
     resetReview(); setBusy("Separating the person from the background locally. This may take a few seconds...");
     try {
-      const mask = matte ?? await portraitMatte(photo.canvas);
+      const mask = matte ?? await portraitMatte(source);
       setMatte(mask);
-      const assessment = assessBackground(photo.canvas, mask);
+      const assessment = assessBackground(source, mask);
       setBackgroundAssessment(assessment);
       if (!assessment.eligible) throw new Error(assessment.reason);
       setBackgroundEnabled(true);
@@ -355,7 +438,7 @@ export default function App() {
       await new Promise<void>(resolve => setTimeout(resolve, 0));
       const fullResolution = renderAdjustments(source, activeTone, backgroundEnabled ? matte : null, matteSettings, backgroundColor);
       const files = await createOutputs(fullResolution, printRect, portalRect, ppi, country === "india", sheetPreset, showCutGuides,
-        { background: backgroundEnabled, lighting: lightingEdited }, printFormat);
+        { background: backgroundEnabled, lighting: lightingEdited, straightened: !!straightened }, printFormat);
       const portalEyes = eyes && country === "india" ? eyeMeasurements(eyes, portalRect, 810) : null;
       const details = {
         application: country === "india" ? "Indian passport: physical print + May 2026 portal dimensions" : country === "usa" ? "US passport: printed submission only" : "Generic 35 x 45 mm print: size only, country-specific requirements not verified",
@@ -365,6 +448,15 @@ export default function App() {
         backgroundCorrection: backgroundEnabled ? { color: BACKGROUND_COLORS[backgroundColor], wallConfirmed, assessment: backgroundAssessment, policy: "Appearance heuristic only; passport compliance not established." } : null,
         lightingEdited,
         lightingSettings: { ...activeTone },
+        straightened: !!straightened,
+        straightening: straightened ? { headRotationDegrees: -straightened.geometry.degrees, correctedEyeLineDegrees: straightened.geometry.degrees,
+          pixels: { width: straightened.geometry.width, height: straightened.geometry.height },
+          edgeExtension: { filledPixels: straightened.edgeFilledPixels, maxPixels: Math.ceil(straightened.maxEdgeExtension),
+            note: "Where the fade zone reached past the photo edge, the plain edge background was extended. Textured edges are refused." },
+          pivot: straightened.geometry.pivot, changedRegion: straightenBounds(straightened.geometry),
+          method: "Head and hair rotate rigidly about the estimated chin; the angle fades smoothly to zero through the neck and nearby background. Pixels outside the changed region are unchanged. No upscaling, fill or face reshaping.",
+          policy: "Head-only straightening bends the neck and nearby background. It is a stronger alteration than whole-photo rotation and may violate application rules. It cannot correct a turned face or raised/lowered chin. Compliance is not established." } : null,
+        poseEstimate: pose ? { ...pose, limits: POSE_LIMITS, note: "Uncalibrated heuristic from local face-detector points, not a verified pose measurement." } : null,
         editingPolicy: isEdited ? "Edited photo. Compliance with application editing restrictions is NOT established." : "No intentional appearance or background edits.",
         imageProcessing: "Browser-decoded pixels re-encoded in sRGB; orientation normalized. Original file unchanged. Exports omit original metadata.",
         inputFormat: photo?.format,
@@ -377,7 +469,7 @@ export default function App() {
           rasterWidthMm: printPixels.width / ppi * 25.4, rasterHeightMm: printPixels.height / ppi * 25.4,
           ppi, rounding: "Nearest whole pixel; maximum physical rounding error is half a pixel per dimension." },
         editing: backgroundEnabled ? { model: "MODNet (local)", settings: matteSettings } : null,
-        processingOrder: ["Original pixels", "Optional linear-light exposure and tonal adjustment", "Optional light-background compositing", "Independent full-resolution crops", "JPEG encoding"],
+        processingOrder: ["Original pixels", ...(straightened ? ["Optional head-only straightening"] : []), "Optional linear-light exposure and tonal adjustment", "Optional light-background compositing", "Independent full-resolution crops", "JPEG encoding"],
         sourceQualityAdvisories: quality,
         manualConfirmations: review,
         eyePlacement: eyes && printRect ? { points: eyes, printMeasurement: eyeMeasurements(eyes, printRect, printSpec.heightMm),
@@ -451,11 +543,53 @@ export default function App() {
           </div>
         </section>
         {!photo && <section className="empty-state"><div className="empty-frame"><span /></div><h2>A better original makes a better print.</h2><p>Face a soft light, stand in front of a plain light wall, and leave space around your head and shoulders. Avoid close-up selfies and filters.</p></section>}
-        {photo && source && previewSource && printRect && portalRect && <>
+        {photo && active && source && previewSource && printRect && portalRect && <>
           <section className="panel">
-            <div className="section-heading"><span className="step">02</span><div><h2>Choose the face &amp; adjust the photo</h2><p>{photo.canvas.width} x {photo.canvas.height} source pixels. Your original stays unchanged.</p></div></div>
-            <FaceSelector key={inputKey} photo={photo} faces={faces} selected={selectedFace} onSelect={selectFace} onManual={selectFace}
+            <div className="section-heading"><span className="step">02</span><div><h2>Choose the face &amp; adjust the photo</h2><p>{source.width} x {source.height} source pixels{straightened ? " (straightened copy)" : ""}. Your original stays unchanged.</p></div></div>
+            <FaceSelector key={`${inputKey}-${straightened ? straightened.geometry.degrees : "original"}`} photo={active} faces={faces} selected={selectedFace} onSelect={selectFace} onManual={selectFace}
+              imageLabel={straightened ? "Straightened photo for face selection and head marking" : undefined}
               eyes={eyes} onEyes={value => { setEyes(value); resetReview(); }} />
+            {pose ? <div className={pose.turned || pose.pitched ? "warning" : "notice"} data-testid="pose-estimate">
+              <strong>Head pose, rough estimate:</strong> eye-line angle {pose.rollDegrees.toFixed(1)} degrees;
+              {" "}nose offset {(pose.noseOffset * 100).toFixed(0)}% of eye spacing; ear balance {pose.earBalance.toFixed(2)};
+              {" "}nose position between eyes and mouth {pose.pitchRatio.toFixed(2)}.
+              {pose.turned && " The face may be turned to one side. Straightening cannot fix this; retake facing the camera directly."}
+              {pose.pitched === "up" && " The chin may be raised. Straightening cannot fix this; retake with the chin level."}
+              {pose.pitched === "down" && " The chin may be lowered. Straightening cannot fix this; retake with the chin level."}
+              {!pose.turned && !pose.pitched && " No strong turn or up/down tilt was indicated."}
+              {" "}These are uncalibrated heuristics from local face-detector points, not a verified pose check. Inspect the photo yourself.
+            </div> : selectedFace && <p className="caption">Turn and up/down pose estimates need a detected face. Check the pose yourself.</p>}
+            <details className="editing-panel straighten-panel" open={!!straightened || (originalTilt !== null && Math.abs(originalTilt) >= 1)}>
+              <summary>Optional: straighten a tilted head <span className="badge neutral">Original by default</span></summary>
+              <p data-testid="eye-line-angle">{originalTilt === null ? "Mark both eyes above to measure the head tilt." :
+                `Eye-line angle in the original: ${originalTilt.toFixed(1)} degrees. ${Math.abs(originalTilt) < 1 ? "The eyes look nearly level." : "The head appears tilted."}`}
+                {originalTilt !== null && Math.abs(originalTilt) > MAX_STRAIGHTEN_DEGREES && ` This exceeds the ${MAX_STRAIGHTEN_DEGREES}-degree limit; retake with the head level.`}</p>
+              <p>Head straightening rotates only the head and hair, as one rigid unit around the chin. The rotation fades smoothly to zero through the neck and the nearby background, so the shoulders, clothing and the rest of the photo stay where they are. The face is not reshaped, nothing is enlarged and the photo keeps its full size.</p>
+              <div className="warning"><strong>This alters your photograph.</strong> The neck and the background close to the head are bent slightly. This is a stronger edit than rotating the whole photo, and the reviewed Indian portal and US instructions prohibit altered photos. Inspect the neck, collar, hair edges and any background pattern near the head. It cannot fix a face turned to one side or a raised or lowered chin. Retaking with the head level is safest.</div>
+              <label className="checkbox"><input type="checkbox" checked={straightenConsent} onChange={event => {
+                setStraightenConsent(event.target.checked);
+                if (event.target.checked) setStraightenDegrees(suggestedStraighten);
+                else { setStraightenDegrees(0); if (straightened) void removeStraightening(); }
+                resetReview();
+              }} />I understand head straightening alters the photo and want to enable it.</label>
+              <fieldset className="tone-controls" disabled={!straightenConsent}>
+                <legend className="sr-only">Optional straightening controls</legend>
+                <Slider label="Straighten angle (degrees)" min={-MAX_STRAIGHTEN_DEGREES} max={MAX_STRAIGHTEN_DEGREES} step={0.1} value={straightenDegrees} defaultValue={0} onChange={setStraightenDegrees} />
+                <p className="caption">Positive values correct a head tilted toward the right side of the image. Use the eye-line angle as a starting point and compare the result. Requires a selected or marked head and both eye markers.</p>
+                <div className="button-row">
+                  <button type="button" className="secondary" disabled={originalTilt === null} onClick={() => setStraightenDegrees(suggestedStraighten)}>Use eye-line angle</button>
+                  <button type="button" className="primary" disabled={straightenDegrees === 0 || !selectedFace || !eyes || straightened?.geometry.degrees === straightenDegrees} onClick={applyStraightening}>Apply straightening</button>
+                  {straightened && <button type="button" className="text-button" onClick={() => { setStraightenDegrees(0); void removeStraightening(); }}>Use unrotated original</button>}
+                </div>
+              </fieldset>
+              {straightened && <>
+                <p className="notice" role="status">Head straightened by {straightened.geometry.degrees.toFixed(1)} degrees. Pixels outside the head, neck and nearby background are unchanged, and the photo keeps all {straightened.geometry.width} x {straightened.geometry.height} pixels.{straightened.edgeFilledPixels > 0 && ` Near the photo edge, ${straightened.edgeFilledPixels.toLocaleString()} background pixels were filled by extending the plain edge up to ${Math.ceil(straightened.maxEdgeExtension)} pixels.`} Faces, eyes and crops were re-measured; review them again.{editConsent && " Run the background check again if you want background correction."}</p>
+                <div className="comparison">
+                  <figure><img src={photo.preview} alt="Original before straightening" /><figcaption>Original, unchanged</figcaption></figure>
+                  <figure><img src={straightened.photo.preview} alt="Straightened photo" /><figcaption>Head straightened, inspect the neck, collar and hair edges</figcaption></figure>
+                </div>
+              </>}
+            </details>
             <details className="quality-details">
               <summary>Original photo quality measurements</summary>
               {quality && <Checks quality={quality} />}
@@ -477,18 +611,18 @@ export default function App() {
                   <button type="button" className="text-button" onClick={() => updateTone({ ...DEFAULT_TONE })}>Reset lighting</button>
                 </div>
                 <div className="tone-grid">
-                  <div><Slider label="Exposure (EV)" min={-1} max={1.5} step={0.05} value={toneSettings.exposure} defaultValue={0} onChange={exposure => updateTone({ ...toneSettings, exposure })} /><p className="caption">Overall brightness. Small changes are usually enough.</p></div>
+                  <div><Slider label="Exposure (EV)" min={-1} max={2.5} step={0.05} value={toneSettings.exposure} defaultValue={0} onChange={exposure => updateTone({ ...toneSettings, exposure })} /><p className="caption">Overall brightness. Small changes are usually enough; an underexposed photo may need +1.5 or more. With a replaced background, raising exposure brightens only the person.</p></div>
                   <div><Slider label="Shadow lift" min={0} max={40} value={toneSettings.shadows} defaultValue={0} onChange={shadows => updateTone({ ...toneSettings, shadows })} /><p className="caption">Lighten dark regions without applying the same lift to highlights.</p></div>
                   <div><Slider label="Highlight reduction" min={0} max={50} value={toneSettings.highlights} defaultValue={0} onChange={highlights => updateTone({ ...toneSettings, highlights })} /><p className="caption">Compress bright regions, including after raising exposure. Start around 15-25 and inspect the face. A replacement background stays unchanged; detail missing from the original cannot be recovered.</p></div>
                   <div><Slider label="Contrast" min={-20} max={20} value={toneSettings.contrast} defaultValue={0} onChange={contrast => updateTone({ ...toneSettings, contrast })} /><p className="caption">Use sparingly. Excess contrast can hide facial detail.</p></div>
                 </div>
               </fieldset>
               {toneConsent && <div className="comparison lighting-comparison">
-                <figure><img src={originalPreview} alt="Original lighting preview" /><figcaption>Original, unchanged</figcaption></figure>
+                <figure><img src={originalPreview} alt="Original lighting preview" /><figcaption>{unmodifiedLabel}</figcaption></figure>
                 <figure><img src={editedPreview} alt="Adjusted lighting preview" /><figcaption>{lightingEdited ? "Lighting adjusted" : "Lighting unchanged"}{backgroundEnabled ? " + corrected background" : ""}</figcaption></figure>
               </div>}
               {previewPending && <p className="status" role="status">Updating the local preview...</p>}
-              <p className="caption">Lighting is applied before optional background replacement, so a replacement white background stays white. Downloads are rendered again from the full-resolution original.</p>
+              <p className="caption">Lighting is applied before optional background replacement, so a replacement white background stays white. Downloads are rendered again from the full-resolution original{straightened ? "'s straightened copy" : ""}.</p>
             </details>
             <details className="editing-panel">
               <summary>Advanced: conservative light-background correction</summary>
@@ -538,7 +672,7 @@ export default function App() {
                 </p>
               </>}
               {backgroundEnabled && <div className="comparison">
-                <figure><img src={originalPreview} alt="Original photograph before background edit" /><figcaption>Original, unchanged</figcaption></figure>
+                <figure><img src={originalPreview} alt="Original photograph before background edit" /><figcaption>{unmodifiedLabel}</figcaption></figure>
                 <figure><img src={editedPreview} alt="Photograph with optional background edit" /><figcaption>Edited, inspect hair and clothing</figcaption></figure>
               </div>}
             </details>
@@ -561,6 +695,7 @@ export default function App() {
             </div>}
             {backgroundEnabled && <div className="warning">Background-edited source is selected. Every photo export will be identified as edited in its filename and report.</div>}
             {lightingEdited && <div className="notice">Lighting adjustments are active. They are included in every photo export and recorded in the report.</div>}
+            {straightened && <div className="notice">Head straightening is active. Every photo export is identified as head-straightened in its filename and report.</div>}
             <details className="editing-panel eye-panel" open>
               <summary>Eye position and optional reference range</summary>
               <p>Mark both pupil centers above, or inspect the detected orange markers. They stay anchored to the original while you move either crop. Eye guides are never exported.</p>
@@ -633,7 +768,7 @@ export default function App() {
                   ["original", "I have permission to process this photo and confirmed its recency and original capture. I understand the tool cannot verify identity, filters or photo age."],
                   ["printing", "I understand the exact-size printing instructions and will verify the current application checklist and physical-copy count."],
                   ...(country === "generic35x45" ? [["countryRules", "I checked my destination's official 35 x 45 mm requirements, including head height, background, expression and editing. This generic profile checks size only."]] : []),
-                  ...(isEdited ? [["edited", "I inspected the edited lighting, skin tones and edges and understand these edits may violate the application instructions. This is not an acceptance guarantee."]] : []),
+                  ...(isEdited ? [["edited", "I inspected every edit (straightening, lighting, skin tones and edges) and understand these edits may violate the application instructions. This is not an acceptance guarantee."]] : []),
                 ] as [keyof Review, string][]).map(([key, label]) =>
                   <label className="checkbox" key={key}><input type="checkbox" checked={review[key]} onChange={event => {
                     setReview({ ...review, [key]: event.target.checked }); invalidate();
@@ -652,7 +787,7 @@ export default function App() {
         <div className="output-grid">{outputs.map(output => <OutputCard key={output.name} output={output} />)}</div>
         <button className="text-button" type="button" onClick={() => triggerDownload(new Blob([report], { type: "application/json" }), "photo-preparation-report.json")}>Download checks &amp; printing instructions (JSON)</button>
       </section>}
-      <footer><p>Local-first. No photo uploads. No government affiliation.</p><p>Version 0.6.4 &bull; <a href="/vision/model-provenance.json" target="_blank" rel="noreferrer">Local models</a> &bull; <a href="/third-party-notices.json" target="_blank" rel="noreferrer">Dependency notices</a></p></footer>
+      <footer><p>Local-first. No photo uploads. No government affiliation.</p><p>Version 0.7.0 &bull; <a href="/vision/model-provenance.json" target="_blank" rel="noreferrer">Local models</a> &bull; <a href="/third-party-notices.json" target="_blank" rel="noreferrer">Dependency notices</a></p></footer>
     </main>
   </div>;
 }

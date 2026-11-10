@@ -35,7 +35,7 @@ export type Quality = {
 export type Header = { format: "jpeg" | "png" | "heic"; width: number; height: number };
 
 export const INITIAL_FRAME: Frame = { zoom: 1, x: 50, y: 50 };
-export type Face = { bounds: Rect; head: Rect; portalHead?: Rect; confidence: number; source: "detected" | "manual"; eyes?: import("./eyes").Eyes };
+export type Face = { bounds: Rect; head: Rect; portalHead?: Rect; confidence: number; source: "detected" | "manual"; eyes?: import("./eyes").Eyes; landmarks?: import("./pose").Landmarks };
 export type FramingDefaults = { print: Frame; portal: Frame; guides: { top: number; chin: number }; ppi: Ppi };
 export type MatteSettings = { cleanup: number; softness: number };
 export const DEFAULT_MATTE: MatteSettings = { cleanup: 3, softness: 100 };

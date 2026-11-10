@@ -31,7 +31,7 @@ HEIC/HEIF decoding happens in a dedicated browser worker. Encoded bytes are tran
 | Dependency/model installation requests | npm registry and public model publishers | Setup providers can see ordinary connection metadata; no browser photograph is involved |
 | Private Git repository | Chosen Git provider | Source, notices and commit metadata only; never photos, outputs, reports or credentials |
 
-The pixel pipeline is local decode/orientation, face and eye estimates, crop review, optional original-based lighting, optional eligible-background compositing, independent crops, and verified JPEG encoding. Guides are preview overlays, not part of exported photographs.
+The pixel pipeline is local decode/orientation, face and eye estimates, optional head-only straightening, crop review, optional original-based lighting, optional eligible-background compositing, independent crops, and verified JPEG encoding. Guides are preview overlays, not part of exported photographs.
 
 - Selecting another original discards the current workspace and outputs.
 - Clear photo discards the active photo, edits and results.

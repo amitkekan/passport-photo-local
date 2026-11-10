@@ -2,6 +2,53 @@
 
 Recorded: 2026-10-15. This document preserves the reasoning, corrections and uncertainty from the planning conversation. It is not a claim that every government rule is fully verified.
 
+## D28: Remove wall-color bleeding from replaced backgrounds; extend exposure range
+
+The owner reported color bleeding into the white replacement background and a face that stayed dark even at maximum settings. Both were measured on the owner's supplied photo, in memory only; no images, paths or values beyond the summary below were retained.
+
+Background bleeding. Previously, compositing drew the original pixels through an upscaled 672 x 512 MODNet alpha and placed the selected color behind them. Soft-edge pixels still contained the old wall color (and shirt color), and the low-resolution mask reached slightly past the true outline. The result was a gray fringe around hair and a tinted fringe along clothing. Compositing (`compositeEdgePixels`, `estimateColorField` in `src/background.ts`) now works per pixel in linear light:
+
+- Estimate local wall color from confident background (raw alpha < 0.05) and local person color from confident foreground (> 0.95). Use normalized box blurs at mask resolution with radius 3% of the mask's long side, a 4x fallback radius, then the global mean.
+- Where wall and person colors differ clearly (linear contrast 0.05 to 0.20 ramps the effect in), reduce edge alpha toward the color-implied alpha. Alpha is only lowered, never raised, and confident-foreground pixels (alpha >= 0.999) are untouched.
+- Remove the wall's contribution (`F = (I - (1 - a)B) / a`, clamped), then blend with the selected color. Alpha 0 gives exactly the selected color; alpha 1 keeps the pixel unchanged.
+
+The owner's photo was measured in its soft outer band (mask alpha 0.02 to 0.5). Mean darkening versus white fell from 15.2 to 8.7 of 255, and the gray hair fringe disappeared visually. A faint tint remains beside real red shirt piping. The mask resolution and MODNet's accuracy are unchanged; fine hair still needs inspection. Low-contrast cases, such as a light shirt on a light wall, keep the mask alpha. Lighting still runs before compositing, and the replacement color is unaffected by lighting.
+
+Dark face. The face measured L* 27 (sRGB about 88, 58, 37) on a wall reading only 155/255: the photo was underexposed and the face was underlit relative to the wall. The former +1.5 EV limit reached only L* about 45, or 50 with maximum shadow lift; maximum highlight reduction lowered it slightly. Exposure now extends to +2.5 EV. It is still the same hue-preserving linear-light gain, opt-in and neutral by default, and +2.5 EV takes that face sample to sRGB 196, 134, 91 without clipping. No automatic face-brightness target was added: skin tone is not underexposure, so brightness remains the user's choice, guided by the comparison preview. With a replaced background, exposure brightens only the person.
+
+## D27: Head-only straightening replaces whole-photo rotation
+
+The owner tested D26's whole-photo rotation on a supplied photo and rejected it: it "changes the angle of the entire photo instead of the head." Local measurement confirmed a common case: eye line about -7 degrees, ear line about -8 degrees, shoulders within about 1 degree of level. Whole-photo rotation levels the head but tilts the shoulders and wall equally. Offered choices were head-only warping, improved whole-photo rotation, both, or retake-only. The owner explicitly chose head-only straightening. This supersedes D26's "rotate whole photo" and "no warping" rules; D26's pose indicators, consent gating, labeling and reset paths remain.
+
+Method (`src/pose.ts`, `src/images.ts`):
+
+- Requires a selected or marked head and both eye markers. Angle limit ±10 degrees, suggested from the eye line.
+- Pivot: the estimated chin, located along the face midline perpendicular to the eye line at the head-box bottom. The head ellipse (0.6 x head width horizontally, 0.55 x head height upward, center-to-chin downward) rotates rigidly, so facial geometry and eye spacing are unchanged. Beyond it the angle fades to zero with a smoothstep, by normalized radius 2 above/beside the head and 1.5 toward the shoulders. Pixels outside that zone are copied unchanged; photo size and resolution are kept.
+- Inverse mapping with bilinear sampling runs only over the affected bounds. Unit tests check a positive Jacobian (no folding) across the fade zone at up to 10 degrees, exact rigid eye leveling, forward/inverse round trips and unchanged distant pixels.
+- Normal passport framing has little headroom, so the fade zone can reach past the photo edge, typically by 1% of image height or less. Such samples extend the nearest edge pixel only if the edge matches the background mirrored inside it (mean difference no more than 6/255). Filled pixel count and maximum extension appear in the UI and report. Textured edges are refused and no straightened copy is created.
+- Filename label `head-straightened`; report fields record pivot, changed region, edge extension, method and policy. The panel warns that the neck and nearby background bend and that this is a stronger alteration than whole-photo rotation.
+
+Owner-supplied photo check (in memory only; no images, measurements or paths retained): the head was leveled from about -7 to under 1 degree on re-detection. Shoulders, shirt and wall were unchanged, and the neck and collar showed no visible tearing at 4x zoom. That copy was 1024 x 768, too small for a 2 x 2 print at 300 PPI without upscaling; the app correctly blocked export.
+
+## D26: Straighten only in-plane tilt; warn about pose that needs a retake (straightening method superseded by D27)
+
+The owner asked how to fix tilted heads/shoulders and faces not aligned with the camera without disturbing the natural photo, then approved both an optional straightening tool and pose warnings.
+
+Only in-plane head tilt (roll) is a rigid transform of existing pixels. Correcting a turned face (yaw) or raised/lowered chin (pitch) requires synthesizing unseen facial geometry, and leveling shoulders separately from the head requires warping. Both alter the person and are excluded; the app recommends a retake instead.
+
+Straightening:
+
+- Off by default; needs explicit consent. The slider suggests the eye-line angle measured from detected or manual pupils. Correction is limited to ±10 degrees; larger tilts should be retaken.
+- One rotation of the full-resolution original about its center, at 1:1 scale with high-quality smoothing. The result is cropped to the largest same-aspect rectangle fully inside the rotated image, minus a 2-pixel antialiasing margin. Edge alpha is verified before use, so no fill or blank corner can reach an export. Fewer source pixels remain, and the unchanged resolution checks still prevent upscaling.
+- Processing order: original -> optional straightening -> lighting -> optional background composite -> independent crops. Rotation never accumulates; changing the angle always starts again from the original.
+- Faces, the portrait mask, crown refinement, quality measurements and crop defaults are recomputed on the straightened copy. The selected face is matched by mapped position; manual heads and manual eye markers are mapped through the rotation. Any active background correction is cleared because its mask no longer applies.
+- Filenames add `straightened` (for example `-straightened-and-lighting-edited`). The report records angle, original/straightened pixel dimensions, method and policy. The edited-photo review confirmation is required.
+- Disabling consent, "Use unrotated original" and global reset restore the original source and re-measure it.
+
+Pose indicators use BlazeFace's six keypoints (eyes, nose tip, mouth center, ear tragions), measured along the eye line so roll does not affect them. A face is flagged as possibly turned if nose offset from the eye midpoint exceeds 15% of eye spacing or the shorter ear-to-eye span is under 45% of the longer one. Chin is flagged as raised/lowered if the nose position between eye line and mouth falls below 0.35 or above 0.75. These limits are uncalibrated engineering guesses chosen to limit false alarms. They were not validated on real faces, because private photographs are not used as test assets. The UI and report label them as rough estimates, not compliance checks. Manual heads show no estimate.
+
+Pixel verification on generated images: dot pairs tilted 6, -3.5 and 10 degrees were level within 0.001 degrees after straightening. Their spacing was unchanged and all pixels were opaque. The straightened copy kept about 89% (6 degrees) or 83% (10 degrees) of each dimension.
+
 ## D25: Edge-to-edge dotted cutting lines
 
 The owner requested end-to-end dotted lines for easier cutting, replacing D14's short corner marks (0.03-inch offset, 0.08-inch length, 0.005-inch stroke). Each unique photo-edge coordinate now gets one dotted line spanning the full sheet: 0.01-inch stroke, 0.04-inch dashes and 0.03-inch spaces. The stroke sits on the waste side with its inner edge exactly on the photo edge, so cutting along the photo side of the dots gives the exact photo size and no ink enters any photo rectangle. Because photos form an aligned grid with 0.25-inch gaps, lines cross only margins and gaps, never another photo. Lines remain optional, enabled by default, sheet-only, and absent from individual photos and portal uploads. Photo sizes, gaps and margins are unchanged.
@@ -295,7 +342,7 @@ This is not permission to upload photos to a third-party API. No cloud processin
 
 The owner reported that their face appeared too dark and asked for basic photo enhancements. They also preferred blue over the previous green interface.
 
-- Supersede the earlier UI exclusion of ordinary tonal controls. Keep automatic changes disabled and expose user-selected exposure (-1 to +1.5 EV), shadow lift (0 to 40), highlight reduction (0 to 50) and contrast (-20 to +20).
+- Supersede the earlier UI exclusion of ordinary tonal controls. Keep automatic changes disabled and expose user-selected exposure (-1 to +1.5 EV, extended to +2.5 EV by D28), shadow lift (0 to 40), highlight reduction (0 to 50) and contrast (-20 to +20).
 - All defaults are zero. Brighten gently uses +0.4 EV, shadow lift 12, no highlight reduction and no contrast. It is a starting point, not automatic skin-tone analysis.
 - Require separate lighting consent and warn about editing restrictions, noise and irrecoverable clipped detail. No generative relighting, face reshaping, invented detail or beauty filters.
 - Adjust in linear light with a common luminance-based RGB gain and a bound preventing individual channel clipping. Alpha is unchanged. The neutral path is exact identity and the original buffer is not mutated.

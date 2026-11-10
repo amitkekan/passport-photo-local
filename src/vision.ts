@@ -3,6 +3,7 @@ import * as ort from "onnxruntime-web/wasm";
 import { estimatedHead, type Face } from "./core";
 import { context, makeCanvas, thumbnail } from "./images";
 import type { Eyes } from "./eyes";
+import type { Landmarks } from "./pose";
 
 export type PortraitMatte = { alpha: Float32Array; width: number; height: number };
 let detector: FaceDetector | undefined;
@@ -57,7 +58,13 @@ export function detectFaces(canvas: HTMLCanvasElement): Face[] {
       points.every(point => Number.isFinite(point.x) && Number.isFinite(point.y) && point.x >= bounds.x &&
         point.x <= bounds.x + bounds.width && point.y >= bounds.y && point.y <= bounds.y + bounds.height)
       ? { left: points[0], right: points[1], source: "detected" } : undefined;
-    return [{ bounds, head: estimatedHead(bounds, canvas.width, canvas.height), eyes,
+    // BlazeFace order: two eyes, nose tip, mouth center, two ear tragions.
+    const all = result.keypoints.map(point => ({ x: point.x * canvas.width, y: point.y * canvas.height }));
+    const landmarks: Landmarks | undefined = eyes && all.length >= 6 && all.every(p => Number.isFinite(p.x) && Number.isFinite(p.y)) ? (() => {
+      const ears = all.slice(4, 6).sort((a, b) => a.x - b.x);
+      return { leftEye: eyes.left, rightEye: eyes.right, nose: all[2], mouth: all[3], leftEar: ears[0], rightEar: ears[1] };
+    })() : undefined;
+    return [{ bounds, head: estimatedHead(bounds, canvas.width, canvas.height), eyes, landmarks,
       confidence: result.categories[0]?.score ?? 0, source: "detected" as const }];
   }).sort((a, b) => a.bounds.x - b.bounds.x);
 }

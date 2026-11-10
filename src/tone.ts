@@ -1,5 +1,5 @@
 export type ToneSettings = { exposure: number; shadows: number; highlights: number; contrast: number };
-export type ImageEdits = { background: boolean; lighting: boolean };
+export type ImageEdits = { background: boolean; lighting: boolean; straightened?: boolean };
 export const DEFAULT_TONE: ToneSettings = { exposure: 0, shadows: 0, highlights: 0, contrast: 0 };
 export const GENTLE_LIFT: ToneSettings = { exposure: 0.4, shadows: 12, highlights: 0, contrast: 0 };
 
@@ -15,7 +15,7 @@ const clamp = (value: number, min: number, max: number) => Math.max(min, Math.mi
 
 export function validateTone(settings: ToneSettings): void {
   if (!Object.values(settings).every(Number.isFinite) ||
-    settings.exposure < -1 || settings.exposure > 1.5 ||
+    settings.exposure < -1 || settings.exposure > 2.5 ||
     settings.shadows < 0 || settings.shadows > 40 ||
     settings.highlights < 0 || settings.highlights > 50 ||
     settings.contrast < -20 || settings.contrast > 20) {
@@ -65,6 +65,6 @@ export function applyTonePixels(input: Uint8ClampedArray, settings: ToneSettings
 }
 
 export function editSuffix(edits: ImageEdits): string {
-  return edits.background && edits.lighting ? "-lighting-and-background-edited" :
-    edits.background ? "-background-edited" : edits.lighting ? "-lighting-edited" : "-original-based";
+  const parts = [edits.straightened && "head-straightened", edits.lighting && "lighting", edits.background && "background"].filter(Boolean);
+  return parts.length ? `-${parts.join("-and-")}-edited` : "-original-based";
 }

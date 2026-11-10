@@ -8,7 +8,18 @@ Help a person choose or take a suitable passport photograph, identify problems, 
 
 Core promise: one original photograph, carefully checked and prepared for digital upload and physical prints, with honest limits on what is verified.
 
-## Latest correction, version 0.6.4
+## Latest correction, version 0.7.0 lighting and background
+
+The owner reported color bleeding into the white replacement background and a face that stayed dark at maximum lighting settings. Replace simple alpha blending with linear-light edge decontamination and color-guided edge tightening (alpha only lowered). Extend exposure to +2.5 EV without adding an automatic skin-brightness target. See D28.
+
+## Latest change, version 0.7.0
+
+The owner noticed photos with tilted heads/shoulders or faces not squarely aligned with the camera, asked whether these could be fixed without making the photo unnatural, and then requested both proposed features:
+
+- **Optional head straightening.** The owner first approved whole-photo rotation, then rejected it after testing because it tilted the level shoulders. By explicit choice, straightening is now head-only: the head and hair rotate rigidly about the chin, the angle fades smoothly through the neck and nearby background, and everything else stays unchanged. It is consent-gated, off by default, suggested from the eye line and limited to ±10 degrees. Keep full image size; never reshape the face or upscale. Extend only plain photo edges when the fade zone reaches beyond the photo, and disclose it. Re-measure faces, eyes, crown mask and crops; label exports `head-straightened`; require edited-photo review. Global reset, disabling consent and "Use unrotated original" restore the original.
+- **Pose warnings.** Turned faces (yaw) and raised/lowered chins (pitch) cannot be fixed naturally; they need a retake. Show rough, uncalibrated pose indicators from the face detector's nose, mouth and ear points, with explicit uncertainty. They are not compliance checks.
+
+## Previous correction, version 0.6.4
 
 The owner found highlight reduction too subtle, requested verification, then explicitly requested a fix. The old control was wired correctly but acted only on very bright luminance and could be overpowered by increased exposure. Replace it with gradual peak-aware compression before clipping, applied after exposure/shadows/contrast. Make the middle and maximum slider positions visibly effective under raised exposure, without changing highlight-off behavior, neutral defaults, colors, reset behavior or the selected replacement-background color. Verify the shared preview/export path with generated bright patches and measurable pixel assertions.
 
@@ -206,6 +217,7 @@ Excluded from passport preparation:
 - Removing glasses digitally.
 - Inventing hair, shoulders, facial detail or clothing.
 - Generative relighting, sharpening or super-resolution.
+- Re-posing a turned face or raised/lowered chin. Only the owner-requested head-only straightening (version 0.7.0, D27) is offered: a rigid head rotation with a smooth neck/background fade.
 
 ## Privacy agreement
 
@@ -221,7 +233,7 @@ Do not promise secure physical RAM erasure or control over browser extensions, o
 
 1. Strengthen real-world evaluation of quality checks without using private photos as test assets.
 2. Review and benchmark face-landmark and segmentation model weights before introducing them.
-3. Add uncertainty-aware automatic pose, eye visibility and framing assistance.
+3. Add uncertainty-aware automatic pose, eye visibility and framing assistance. Version 0.7.0 adds rough, uncalibrated turn/up-down indicators; calibration against consented, non-private evaluation data remains open.
 4. Add browser camera capture and live guidance.
 5. Review HEIC decoder licensing and codec patent implications before enabling support.
 6. Add independently verified application profiles.

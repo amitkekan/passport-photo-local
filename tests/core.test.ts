@@ -8,8 +8,11 @@ import {
   printDimensions, PRINT_FORMATS, validPrintHead, frameAroundHead, suggestPortalFraming, refinePortalHead, portalHeadFromGuides,
 } from "../src/core.ts";
 import { applyTonePixels, DEFAULT_TONE, GENTLE_LIFT, editSuffix, hasTone } from "../src/tone.ts";
-import { assessBackgroundPixels } from "../src/background.ts";
+import { assessBackgroundPixels, BACKGROUND_COLORS, compositeEdgePixels, estimateColorField } from "../src/background.ts";
 import { eyeMeasurements, eyesWithinTarget, validEyeTarget } from "../src/eyes.ts";
+import {
+  estimatePose, eyeLineDegrees, fromStraightened, mapEyes, MAX_STRAIGHTEN_DEGREES, POSE_LIMITS, straightenBounds, straightening, straightenWeight, toStraightened, validStraightenDegrees,
+} from "../src/pose.ts";
 
 test("HEIC preflight reads coded dimensions without decoding and rejects malformed or oversized containers", () => {
   const source = readFileSync(new URL("./fixtures/rainbow-451x461.heic", import.meta.url));
@@ -404,10 +407,17 @@ test("highlight compression preserves linear color ratios without inventing clip
 test("invalid lighting settings and malformed pixel buffers fail explicitly", () => {
   for (const settings of [
     { ...DEFAULT_TONE, exposure: NaN }, { ...DEFAULT_TONE, exposure: Infinity },
-    { ...DEFAULT_TONE, exposure: 1.6 }, { ...DEFAULT_TONE, shadows: -1 },
+    { ...DEFAULT_TONE, exposure: 2.6 }, { ...DEFAULT_TONE, shadows: -1 },
     { ...DEFAULT_TONE, highlights: 51 }, { ...DEFAULT_TONE, contrast: -21 },
   ]) assert.throws(() => applyTonePixels(new Uint8ClampedArray(4), settings), /supported range/);
   assert.throws(() => applyTonePixels(new Uint8ClampedArray(3), DEFAULT_TONE), /RGBA/);
+  // A dark, underexposed face (sRGB 88, 58, 37) needs the extended range to reach a moderate brightness.
+  const darkFace = new Uint8ClampedArray([88, 58, 37, 255]);
+  const brightest = applyTonePixels(darkFace, { ...DEFAULT_TONE, exposure: 2.5 });
+  const previousMax = applyTonePixels(darkFace, { ...DEFAULT_TONE, exposure: 1.5 });
+  assert.deepEqual([...brightest], [196, 134, 91, 255], "+2.5 EV brightens without clipping");
+  assert.ok(brightest[0] - previousMax[0] > 40, "extended exposure is materially brighter than the former +1.5 EV limit");
+  assert.ok(Math.abs(brightest[0] / brightest[1] - previousMax[0] / previousMax[1]) < 0.05, "hue ratios are preserved");
 });
 
 test("filenames distinguish original, lighting, background and combined edits", () => {
@@ -415,6 +425,88 @@ test("filenames distinguish original, lighting, background and combined edits", 
   assert.equal(editSuffix({ background: false, lighting: true }), "-lighting-edited");
   assert.equal(editSuffix({ background: true, lighting: false }), "-background-edited");
   assert.equal(editSuffix({ background: true, lighting: true }), "-lighting-and-background-edited");
+  assert.equal(editSuffix({ background: false, lighting: false, straightened: false }), "-original-based");
+  assert.equal(editSuffix({ background: false, lighting: false, straightened: true }), "-head-straightened-edited");
+  assert.equal(editSuffix({ background: true, lighting: true, straightened: true }), "-head-straightened-and-lighting-and-background-edited");
+});
+
+test("head straightening rotates the head rigidly, fades smoothly, never folds and leaves distant pixels unchanged", () => {
+  for (const [width, height, head] of [
+    [1800, 2200, { x: 600, y: 300, width: 600, height: 720 }],
+    [1024, 768, { x: 410, y: 281, width: 187, height: 224 }],
+    [4000, 3000, { x: 1500, y: 600, width: 900, height: 1100 }],
+  ] as const) for (const degrees of [-10, -6.95, 0.5, 4, 10]) {
+    const a = degrees * Math.PI / 180, cx = head.x + head.width / 2, ey = head.y + head.height * 0.42, half = head.width * 0.18;
+    const eyes = { left: { x: cx - half * Math.cos(a), y: ey - half * Math.sin(a) }, right: { x: cx + half * Math.cos(a), y: ey + half * Math.sin(a) }, source: "detected" as const };
+    assert.ok(Math.abs(eyeLineDegrees(eyes) - degrees) < 1e-9);
+    const g = straightening(width, height, head, eyes, degrees);
+    assert.equal(g.width, width); assert.equal(g.height, height);
+    // The pivot sits on the face midline, below the eyes at the estimated chin.
+    const mid = { x: cx, y: ey };
+    assert.ok(Math.abs(Math.atan2(g.pivot.x - mid.x, g.pivot.y - mid.y) + a) < 1e-9);
+    // Eyes lie inside the rigid zone: exactly level afterwards, with unchanged spacing.
+    const level = mapEyes(eyes, p => toStraightened(p, g));
+    assert.ok(Math.abs(eyeLineDegrees(level)) < 1e-6);
+    assert.ok(Math.abs(Math.hypot(level.right.x - level.left.x, level.right.y - level.left.y) - 2 * half) < 1e-6);
+    for (const p of [eyes.left, eyes.right]) assert.equal(straightenWeight(toStraightened(p, g), g), 1);
+    // Outside the bounds nothing moves; image corners and lower shoulders stay put.
+    const bounds = straightenBounds(g);
+    for (const p of [{ x: 0, y: 0 }, { x: width - 1, y: height - 1 }, { x: 1, y: height - 2 }, { x: cx, y: Math.min(height - 1, head.y + head.height * 2.2) }]) {
+      if (p.x >= bounds.x && p.x < bounds.x + bounds.width && p.y >= bounds.y && p.y < bounds.y + bounds.height) continue;
+      assert.equal(straightenWeight(p, g), 0); assert.deepEqual(fromStraightened(p, g), p);
+    }
+    // Weight is continuous and the inverse map is locally invertible (positive Jacobian) everywhere in the fade zone.
+    const step = Math.max(2, Math.round(Math.min(bounds.width, bounds.height) / 70)), h = 0.25;
+    let previous: number | null = null;
+    for (let y = bounds.y; y < bounds.y + bounds.height; y += step) for (let x = bounds.x; x < bounds.x + bounds.width; x += step) {
+      const q = { x: x + 0.5, y: y + 0.5 };
+      const sx = fromStraightened({ x: q.x + h, y: q.y }, g), sx0 = fromStraightened({ x: q.x - h, y: q.y }, g);
+      const sy = fromStraightened({ x: q.x, y: q.y + h }, g), sy0 = fromStraightened({ x: q.x, y: q.y - h }, g);
+      const det = ((sx.x - sx0.x) * (sy.y - sy0.y) - (sy.x - sy0.x) * (sx.y - sx0.y)) / (4 * h * h);
+      assert.ok(det > 0.2, `fold at ${x},${y} for ${degrees} degrees: ${det}`);
+      const w = straightenWeight(q, g);
+      if (previous !== null && x !== bounds.x) assert.ok(Math.abs(w - previous) < 0.25);
+      previous = w;
+      const back = toStraightened(fromStraightened(q, g), g);
+      assert.ok(Math.hypot(back.x - q.x, back.y - q.y) < 1e-6);
+    }
+  }
+  const eyes = { left: { x: 800, y: 600 }, right: { x: 1000, y: 600 }, source: "manual" as const };
+  for (const degrees of [10.01, -11, Number.NaN, Infinity]) {
+    assert.equal(validStraightenDegrees(degrees), false);
+    assert.throws(() => straightening(1800, 2200, { x: 600, y: 300, width: 600, height: 720 }, eyes, degrees), /limited to 10 degrees/);
+  }
+  assert.throws(() => straightening(1800, 2200, { x: 600, y: 300, width: 0, height: 720 }, eyes, 5), /Select or mark the head/);
+  assert.throws(() => straightening(1800, 2200, { x: 600, y: 300, width: 600, height: 720 }, { ...eyes, right: eyes.left }, 5), /distinct eye/);
+  assert.equal(MAX_STRAIGHTEN_DEGREES, 10);
+});
+
+test("pose heuristics flag turned and raised/lowered faces independently of in-plane tilt", () => {
+  const frontal = { leftEye: { x: 400, y: 400 }, rightEye: { x: 500, y: 400 }, nose: { x: 450, y: 455 }, mouth: { x: 450, y: 500 },
+    leftEar: { x: 330, y: 420 }, rightEar: { x: 570, y: 420 } };
+  const level = estimatePose(frontal)!;
+  assert.equal(level.turned, false); assert.equal(level.pitched, null);
+  assert.ok(Math.abs(level.rollDegrees) < 1e-9 && Math.abs(level.noseOffset) < 1e-9 && Math.abs(level.earBalance - 1) < 1e-9);
+  assert.ok(Math.abs(level.pitchRatio - 0.55) < 1e-9);
+  const rotate = (points: typeof frontal, degrees: number) => {
+    const a = degrees * Math.PI / 180;
+    return Object.fromEntries(Object.entries(points).map(([key, p]) => [key, {
+      x: 450 + (p.x - 450) * Math.cos(a) - (p.y - 450) * Math.sin(a), y: 450 + (p.x - 450) * Math.sin(a) + (p.y - 450) * Math.cos(a),
+    }])) as typeof frontal;
+  };
+  const tilted = estimatePose(rotate(frontal, 8))!;
+  assert.ok(Math.abs(tilted.rollDegrees - 8) < 1e-9);
+  assert.equal(tilted.turned, false); assert.equal(tilted.pitched, null);
+  assert.ok(Math.abs(tilted.pitchRatio - level.pitchRatio) < 1e-9);
+  const turned = estimatePose({ ...frontal, nose: { x: 470, y: 455 }, rightEar: { x: 520, y: 420 } })!;
+  assert.equal(turned.turned, true);
+  assert.equal(estimatePose({ ...frontal, nose: { x: 450 + POSE_LIMITS.noseOffset * 100 - 1, y: 455 } })!.turned, false);
+  assert.equal(estimatePose({ ...frontal, rightEar: { x: 530, y: 420 } })!.turned, true);
+  assert.equal(estimatePose({ ...frontal, nose: { x: 450, y: 430 } })!.pitched, "up");
+  assert.equal(estimatePose({ ...frontal, nose: { x: 450, y: 485 } })!.pitched, "down");
+  assert.equal(estimatePose({ ...frontal, rightEye: { x: 400, y: 400 } }), null);
+  assert.equal(estimatePose({ ...frontal, mouth: { x: 450, y: 380 } }), null);
+  assert.equal(estimatePose({ ...frontal, nose: { x: Number.NaN, y: 455 } }), null);
 });
 
 test("square and portal crops retain aspect ratio and remain in original bounds", () => {
@@ -660,6 +752,54 @@ test("crop adjustment keeps head guides anchored to the same source points", () 
   const guides = reprojectGuides(oldRect, nextRect, { top: 20, chin: 80 });
   assert.equal(nextRect.y + nextRect.height * guides.top / 100, 400);
   assert.equal(nextRect.y + nextRect.height * guides.chin / 100, 1000);
+});
+
+test("background replacement removes the old wall color from soft edges and never adds foreground", () => {
+  const toLinear = (v: number) => { const x = v / 255; return x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4; };
+  const toSrgb = (v: number) => Math.round(255 * (v <= 0.0031308 ? 12.92 * v : 1.055 * v ** (1 / 2.4) - 0.055));
+  // A 40 x 8 strip: blue shirt on the left, lavender-gray wall on the right, with a soft 8-pixel transition.
+  const width = 40, height = 8, wall = [160, 155, 170], shirt = [30, 40, 140];
+  const alpha = new Float32Array(width * height), data = new Uint8ClampedArray(width * height * 4);
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    const a = Math.max(0, Math.min(1, (24 - x) / 8)), i = y * width + x;
+    alpha[i] = a;
+    for (let c = 0; c < 3; c++) data[i * 4 + c] = toSrgb(a * toLinear(shirt[c]) + (1 - a) * toLinear(wall[c]));
+    data[i * 4 + 3] = 255;
+  }
+  const field = estimateColorField(data, alpha, width, height);
+  const out = data.slice();
+  compositeEdgePixels(out, width, height, alpha, field, [255, 255, 255]);
+  for (let x = 0; x < width; x++) {
+    const i = (4 * width + x) * 4, a = alpha[4 * width + x];
+    if (a >= 0.999) assert.deepEqual([...out.slice(i, i + 3)], [...data.slice(i, i + 3)]);
+    else if (a <= 0.001) assert.deepEqual([...out.slice(i, i + 4)], [255, 255, 255, 255]);
+    else {
+      // Expected: the shirt blended with white, with no lavender-gray wall contribution left behind.
+      const expected = shirt.map(v => toSrgb(a * toLinear(v) + (1 - a)));
+      for (let c = 0; c < 3; c++) assert.ok(Math.abs(out[i + c] - expected[c]) <= 3, `x=${x} c=${c}: ${out[i + c]} vs ${expected[c]}`);
+    }
+  }
+  // Mask overreach: a pure-wall pixel the mask wrongly marks as 30% person becomes the new background color.
+  const halo = alpha.slice(); const haloIndex = 4 * width + 30; halo[haloIndex] = 0.3;
+  const haloOut = data.slice();
+  compositeEdgePixels(haloOut, width, height, halo, field, [255, 255, 255]);
+  for (let c = 0; c < 3; c++) assert.ok(haloOut[haloIndex * 4 + c] >= 252);
+  // Low-contrast person/wall colors (light shirt on a light wall) keep the mask alpha instead of being erased.
+  const lightShirt = 234, lightWall = 230;
+  const light = new Uint8ClampedArray(data.length);
+  for (let i = 0; i < width * height; i++) {
+    const v = toSrgb(alpha[i] * toLinear(lightShirt) + (1 - alpha[i]) * toLinear(lightWall));
+    light.set([v, v, v, 255], i * 4);
+  }
+  const lightOut = light.slice();
+  compositeEdgePixels(lightOut, width, height, alpha, estimateColorField(light, alpha, width, height), [255, 255, 255]);
+  const edge = 4 * width + 18, edgeAlpha = alpha[edge];
+  assert.ok(Math.abs(lightOut[edge * 4] - toSrgb(edgeAlpha * toLinear(lightShirt) + (1 - edgeAlpha))) <= 3, "light foreground at the edge must remain visible");
+  // Selected light colors are applied exactly where there is no person.
+  const neutral = data.slice();
+  compositeEdgePixels(neutral, width, height, alpha, field, BACKGROUND_COLORS.neutral.rgb);
+  assert.deepEqual([...neutral.slice((4 * width + 39) * 4, (4 * width + 39) * 4 + 4)], [245, 245, 245, 255]);
+  assert.throws(() => compositeEdgePixels(data.slice(4), width, height, alpha, field, [255, 255, 255]), /mismatched/);
 });
 
 test("matting preserves soft hair alpha and solid foreground instead of matching foreground colors", () => {

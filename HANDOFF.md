@@ -16,7 +16,31 @@ The owner requested moving the entire existing project to `D:\private_repos\pass
 
 This explicitly supersedes the original personal-profile location requirement. No Git repository, remote, commit or push was created. Use the new working directory below; scripts resolve project assets relative to their own location.
 
-## Latest change: edge-to-edge dotted cutting lines
+## Latest correction: background edge bleeding and dark faces (0.7.0)
+
+The owner reported color bleeding into the white replacement background and a face that stayed dark at maximum settings. See D28.
+
+- `src/background.ts`: `estimateColorField` estimates local wall/person colors at mask resolution. `compositeEdgePixels` decontaminates soft edges in linear light and tightens wall-colored mask overreach (alpha only lowered). The background colors gained RGB values.
+- `src/images.ts`: `compositeBackground` uses the per-pixel compositor instead of canvas alpha masking.
+- `src/tone.ts` / `src/App.tsx`: exposure range -1 to +2.5 EV, with caption guidance.
+
+Verification: 48 core tests passed. A new test checks exact decontaminated edges against a known shirt/wall blend, mask-overreach removal, low-contrast preservation, exact replacement colors and mismatched-input errors; a lighting test covers the extended range. TypeScript/production build passed, and all 25 browser scenarios passed. On the owner's photo, in memory only, mean edge-band darkening fell from 15.2 to 8.7 of 255, the gray hair fringe disappeared, and +2 EV with shadow lift 20 brightened the face naturally.
+
+Testing note: a failing `assert.ok` without a message made `node --test` appear to hang. Node re-parses the transformed source to build the message. Give new assertions explicit messages.
+## Previous change: version 0.7.0 straightening and pose
+
+The owner asked how to handle tilted heads/shoulders and faces not aligned with the camera without making photos unnatural, and approved straightening plus pose warnings (D26). After testing whole-photo rotation on a supplied photo, the owner rejected it because it tilted the level shoulders and wall. They explicitly chose head-only straightening (D27), which replaces the whole-photo method in this unreleased version.
+
+- `src/pose.ts` (new): eye-line angle, ±10 degree limit, head-only warp geometry (chin pivot on the face midline, rigid head ellipse, smoothstep fade), weight function, inverse/forward mapping, changed-region bounds, eye mapping and rough pose estimation from six detector keypoints.
+- `src/images.ts`: `straightenCanvas` bilinearly inverse-maps only the affected region at full resolution and keeps image size. It extends plain photo edges where the fade zone reaches beyond the photo, refuses textured edges and returns fill statistics.
+- `src/vision.ts`: detected faces carry nose/mouth/ear landmarks.
+- `src/App.tsx`: the active source is the original or its head-straightened copy. Shared `analyzeSource` re-detects faces, crown mask, quality and crop defaults after upload, apply or remove. The selected head and eyes are mapped back to original coordinates, so re-applying always starts from the original. Background correction clears on source changes. Also adds the panel with consent, slider, suggestion, comparison and removal; the pose-estimate note; `head-straightened` filename/report fields including edge extension; and reset/consent removal paths.
+- `src/tone.ts`: `editSuffix` composes head-straightened/lighting/background labels; existing names are unchanged.
+
+Verification: 47 core tests passed. They cover rigid eye leveling, unchanged eye spacing, chin-pivot placement, no folding (positive Jacobian) across the fade zone up to 10 degrees, round-trip mapping, unchanged distant pixels, pose heuristics invariant to roll and filename composition. TypeScript/production build passed, and all 25 browser scenarios passed. The two new scenarios cover the offline straightening workflow (head pixels change; lower shirt and corners unchanged; full size kept; disclosed edge fill; labeled exports; report; unrotated restore; global reset; consent removal; no network or storage) and refusal of a textured edge. The owner-supplied photo was checked offline in the production app in memory only. It went from about -7 to under 1 degree, with unchanged shoulders and natural neck/collar at 4x zoom. Its 1024 x 768 copy is too small for a 2 x 2 print without upscaling, and the app blocks that export. No image, measurement or path from it was retained. Pose thresholds remain uncalibrated on real faces.
+
+No dependencies or models were added; the existing license-review flags remain.
+## Previous change: edge-to-edge dotted cutting lines
 
 The owner requested end-to-end dotted cutting lines. `sheetLayout` now emits one full-sheet dotted line per unique photo-edge coordinate (0.01-inch stroke, 0.04/0.03-inch dash pattern exposed as `guideDash`) instead of eight short marks per photo. Each stroke's inner edge sits exactly on the photo edge, on the waste side, so no ink enters a photo; grid alignment keeps lines out of other photos. UI caption and printing instructions now say to cut on the photo side of each dotted line. See D25.
 

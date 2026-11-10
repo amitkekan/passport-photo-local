@@ -3,9 +3,9 @@ import type { Face } from "./core";
 import type { Photo } from "./images";
 import type { Eyes } from "./eyes";
 
-export default function FaceSelector({ photo, faces, selected, onSelect, onManual, eyes, onEyes }: {
+export default function FaceSelector({ photo, faces, selected, onSelect, onManual, eyes, onEyes, imageLabel = "Full original for face selection and head marking" }: {
   photo: Photo; faces: Face[]; selected: Face | null; onSelect: (face: Face) => void; onManual: (face: Face) => void;
-  eyes: Eyes | null; onEyes: (eyes: Eyes) => void;
+  eyes: Eyes | null; onEyes: (eyes: Eyes) => void; imageLabel?: string;
 }) {
   const [marking, setMarking] = useState<"head" | "eyes" | null>(null);
   const [top, setTop] = useState<{ x: number; y: number } | null>(null);
@@ -52,7 +52,7 @@ export default function FaceSelector({ photo, faces, selected, onSelect, onManua
       <p className="caption">{selected ? selected.source === "manual" ? "Using your manually marked head." : "Detected face selected. Head extent is estimated, not a verified hair boundary." : "No face selected yet. Manual crop controls remain available."}</p>
     </div>
     <div className={`face-selection-image ${marking ? "marking" : ""}`}>
-      <img src={photo.preview} alt="Full original for face selection and head marking" onClick={mark} draggable={false} />
+      <img src={photo.preview} alt={imageLabel} onClick={mark} draggable={false} />
       {!marking && faces.map((face, i) => <button type="button" key={i} aria-label={`Choose detected face ${i + 1}`} className={`face-box ${selected === face ? "selected" : ""}`}
         style={{ left: `${face.bounds.x / width * 100}%`, top: `${face.bounds.y / height * 100}%`, width: `${face.bounds.width / width * 100}%`, height: `${face.bounds.height / height * 100}%` }}
         onClick={() => onSelect(face)}><span>Face {i + 1}</span></button>)}

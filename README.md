@@ -40,6 +40,7 @@ The production local server binds only to loopback, serves a fixed set of build 
 - Conservative light-background correction using local MODNet matting. Original-pixel brightness, color, texture and mask-confidence checks gate correction; unsuitable or uncertain backgrounds have no override. White, very light neutral and very light warm choices, with consent, wall confirmation, before/after, edge controls and edited filenames.
 - User-initiated JPEG downloads and a JSON preparation report, without saving data in the application.
 - Optional, consent-gated exposure, shadow lift, highlight reduction and contrast. Neutral defaults, a Brighten gently preset, per-slider reset and Reset lighting. No skin smoothing, face reshaping or generative relighting.
+- Optional, consent-gated head-only straightening of a tilted head (rigid head rotation up to ±10 degrees with a smooth neck fade; shoulders unchanged), plus rough turned-face and chin-up/down warnings from local detector points.
 - Blue/slate interface with an expanded lighting panel, original/adjusted comparison and collapsible original-quality measurements.
 
 ## Brightening a dark photo
@@ -47,7 +48,7 @@ The production local server binds only to loopback, serves a fixed set of build 
 1. Select the correct face or mark the head manually.
 2. In **Optional: lighting adjustments**, read the warning and enable the controls.
 3. Try **Brighten gently** (+0.4 EV, shadow lift 12), then compare with the original. The preset is a conservative starting point, not an automatic face-specific recommendation.
-4. Adjust exposure or shadows in small steps. Use highlight reduction for bright regions and contrast sparingly. These global adjustments cannot repair missing detail, motion blur or severe lighting problems.
+4. Adjust exposure or shadows in small steps. Exposure ranges from -1 to +2.5 EV; a badly underexposed photo may need +1.5 or more, and with a replaced background exposure brightens only the person. Use highlight reduction for bright regions and contrast sparingly; at high settings both can make a face look darker. These global adjustments cannot repair missing detail, motion blur or severe lighting problems.
 5. Use a slider's Reset button, **Reset lighting**, or disable the controls to return to neutral. Disabling removes lighting changes; Reset all also removes background editing and consent.
 6. Recheck the crops and review confirmations before preparing files. Lighting and background edits are labeled separately or together in filenames and recorded in the report.
 
@@ -63,7 +64,18 @@ In version 0.6.4, **Highlight reduction** uses a stronger, gradual highlight-com
 4. The blue band is your supplied reference. Both eyes must fit it before export. It is not applied to the portal JPEG. Changing application profile clears the range.
 5. Confirm that markers match visible pupils and manually check open eyes, level pose and obstructions. Eye guides and bands are never exported.
 
-No government-approved numeric band is selected automatically. Available source text did not establish a reliable numeric range, and text extraction from a diagram is not authoritative evidence. This feature measures placement; it does not certify eye position or automatically straighten the person.
+No government-approved numeric band is selected automatically. Available source text did not establish a reliable numeric range, and text extraction from a diagram is not authoritative evidence. This feature measures placement; it does not certify eye position. Straightening is a separate, optional edit (below).
+
+## Tilted heads and pose (version 0.7.0)
+
+**Head straightening** corrects a head tilted toward a shoulder (eyes not level) while leaving the shoulders where they are.
+
+1. Select or mark the head and mark or inspect both eye markers. **Optional: straighten a tilted head** shows the eye-line angle in the original and opens automatically when the tilt is at least 1 degree.
+2. Read the warning and enable straightening. The angle slider starts at the measured eye-line angle; **Use eye-line angle** restores that suggestion. The limit is ±10 degrees. Retake larger tilts.
+3. **Apply straightening** rotates the head and hair as one rigid unit around the chin, so the face is not reshaped. The rotation fades smoothly to zero through the neck and the nearby background. Shoulders, clothing and the rest of the photo are unchanged, and the photo keeps its full size. If the fade zone reaches past a plain photo edge, a few edge pixels are extended and the count is shown; a textured edge is refused.
+4. Faces, eyes, crown estimate and crop defaults are re-measured, so review them again. Rerun any background correction. Exports are labeled `head-straightened` in filenames and in the report, and need the edited-photo confirmation. **Use unrotated original**, unchecking consent, or **Reset all adjustments** returns to the original.
+
+This bends the neck and nearby background slightly, which is a real alteration. The reviewed Indian portal and US instructions prohibit altered photos, so inspect the neck, collar and hair edges, and prefer a retake. Straightening cannot fix a face turned to one side or a raised or lowered chin. When a face is detected, a **Head pose, rough estimate** note uses the detector's nose, mouth and ear points to warn about these. Its limits are uncalibrated heuristics, not a pose-compliance check.
 
 ## Conservative background correction
 
@@ -75,7 +87,7 @@ Version 0.6.3 also corrects false rejection of tinted light walls: mean color sp
 
 Near-black samples (below 65) still cannot exceed 0.5%. Busy-texture and mask-confidence limits are unchanged, and vivid colors remain blocked. Dark hair or clothing missed by the mask must not be treated as a harmless wall shadow. Rejections distinguish overall dimness, moderate shadow coverage, near-black patches and excessive color, with a reminder that a mask error can be responsible. There is no override. These are editing safeguards, not a wall/forest classifier or official passport requirements. Some suitable walls will still be rejected when separation is unreliable.
 
-White is the default and preferred when white is required. Other light tones may be unsuitable for that application. Inspect hair, glasses, clothing and transparent edges in the comparison, then review every crop. Solid foreground pixels are retained, but soft boundary blending can affect fine details. **Use original background** removes correction; **Reset background settings** restores white and default edge controls; **Reset all adjustments** removes edits and consent.
+White is the default and preferred when white is required. Other light tones may be unsuitable for that application. Inspect hair, glasses, clothing and transparent edges in the comparison, then review every crop. Solid foreground pixels are retained. At soft edges, the app estimates the local wall and person colors and removes the old wall color, instead of blending it into the new background; this prevents gray or tinted fringes around hair and clothing. Where the colors clearly show a mask-edge pixel is wall, it is made more transparent (never less). The portrait mask is still lower resolution than the photo, so fine hair can soften or lose strands. **Use original background** removes correction; **Reset background settings** restores white and default edge controls; **Reset all adjustments** removes edits and consent.
 
 This cannot make an edited photograph compliant with a prohibition on editing. The reviewed Indian portal instructions prohibit photo-editing tools, and U.S. guidance restricts alteration. Retaking against a suitable wall is safer. Outputs and reports identify edits rather than asserting acceptance.
 

@@ -479,6 +479,138 @@ test("lighting resets are neutral and disabling, replacing or clearing a photo r
   await expect(consent).not.toBeChecked();
 });
 
+test("optional head straightening rotates only the head, re-measures, labels exports and is removed by every reset path", async ({ page, context }) => {
+  await openWorkspace(page);
+  const requests: string[] = [], errors: string[] = [];
+  page.on("request", request => { if (/^https?:/.test(request.url())) requests.push(request.url()); });
+  page.on("pageerror", error => errors.push(error.message));
+  await context.setOffline(true);
+  await page.locator("#photo-upload").setInputFiles(await fixture(page));
+  await markHead(page);
+  await markEyes(page);
+  await expect(page.getByTestId("eye-line-angle")).toContainText("Eye-line angle in the original: 0.0 degrees. The eyes look nearly level.");
+  // Re-mark with the right pupil lower: about 7.7 degrees on the 1800 x 2200 source.
+  await page.getByRole("button", { name: "Mark both eyes", exact: true }).click();
+  const image = page.getByRole("img", { name: "Full original for face selection and head marking", exact: true });
+  const bounds = (await image.boundingBox())!;
+  await image.click({ position: { x: bounds.width * 0.41, y: bounds.height * 0.35 } });
+  await image.click({ position: { x: bounds.width * 0.59, y: bounds.height * 0.37 } });
+  const angleText = await page.getByTestId("eye-line-angle").textContent();
+  const measured = Number(/original: (-?\d+\.\d) degrees/.exec(angleText ?? "")![1]);
+  expect(measured).toBeGreaterThan(6.5); expect(measured).toBeLessThan(9);
+  await expect(page.getByText("The head appears tilted.", { exact: false })).toBeVisible();
+  const consent = page.getByRole("checkbox", { name: /I understand head straightening alters the photo/ });
+  const apply = page.getByRole("button", { name: "Apply straightening", exact: true });
+  await expect(apply).toBeDisabled();
+  await consent.check();
+  const slider = page.getByRole("slider", { name: "Straighten angle (degrees)", exact: true });
+  const suggested = Number(await slider.inputValue());
+  expect(Math.abs(suggested - measured)).toBeLessThanOrEqual(0.051);
+  await apply.click();
+  await expect(page.getByText(`Head straightened by ${suggested.toFixed(1)} degrees.`, { exact: false })).toBeVisible();
+  await expect(page.getByText("(straightened copy)", { exact: false })).toBeVisible();
+  await expect(page.getByRole("img", { name: "Straightened photo for face selection and head marking", exact: true })).toBeVisible();
+  await expect(page.getByAltText("Original before straightening", { exact: true })).toBeVisible();
+  // Only the head area changes; the lower shirt and image corners keep their original pixels.
+  const difference = await page.evaluate(async () => {
+    const read = async (alt: string) => {
+      const image = document.querySelector<HTMLImageElement>(`img[alt="${alt}"]`)!;
+      await image.decode();
+      const canvas = document.createElement("canvas"); canvas.width = image.naturalWidth; canvas.height = image.naturalHeight;
+      const ctx = canvas.getContext("2d")!; ctx.drawImage(image, 0, 0);
+      return { ctx, width: canvas.width, height: canvas.height };
+    };
+    const [a, b] = [await read("Original before straightening"), await read("Straightened photo")];
+    const mean = (x: number, y: number, w: number, h: number) => {
+      const p = a.ctx.getImageData(Math.round(x * a.width), Math.round(y * a.height), Math.round(w * a.width), Math.round(h * a.height)).data;
+      const q = b.ctx.getImageData(Math.round(x * b.width), Math.round(y * b.height), Math.round(w * b.width), Math.round(h * b.height)).data;
+      let sum = 0; for (let i = 0; i < p.length; i += 4) sum += Math.abs(p[i] - q[i]) + Math.abs(p[i + 1] - q[i + 1]) + Math.abs(p[i + 2] - q[i + 2]);
+      return sum / (p.length / 4) / 3;
+    };
+    return { sameSize: a.width === b.width && a.height === b.height, head: mean(0.3, 0.12, 0.4, 0.4), shirt: mean(0.2, 0.85, 0.6, 0.14), corner: mean(0, 0, 0.1, 0.1) };
+  });
+  expect(difference.sameSize).toBe(true);
+  expect(difference.head).toBeGreaterThan(3);
+  expect(difference.shirt).toBeLessThan(0.5);
+  expect(difference.corner).toBeLessThan(0.5);
+  // The re-measured eye line is level in the straightened copy, while the original angle stays reported.
+  await expect(page.locator(".crop-card .eye-measurement").first()).toContainText(/Eye-line angle: -?0\.\d degrees/);
+  await expect(page.getByTestId("eye-line-angle")).toContainText(`original: ${measured.toFixed(1)} degrees`);
+  await expect(page.getByText("Head straightening is active.", { exact: false })).toBeVisible();
+  for (const checkbox of await page.locator(".review-list input[type=checkbox]").all()) await checkbox.check();
+  await page.getByRole("button", { name: /Prepare verified-size/ }).click();
+  await expect(page.locator(".output-card")).toHaveCount(3);
+  for (const [label, width, height] of [["Download 2 x 2 photo", 1200, 1200], ["Download portal JPEG", 630, 810], ["Download sheet", 3000, 4200]] as const) {
+    const pending = page.waitForEvent("download");
+    await page.getByRole("button", { name: label, exact: true }).click();
+    const download = await pending, data = await bytes(download);
+    expect(download.suggestedFilename()).toContain("-head-straightened-edited.jpg");
+    expect(readHeader(data)).toEqual({ format: "jpeg", width, height });
+  }
+  const reportPending = page.waitForEvent("download");
+  await page.getByRole("button", { name: /Download checks & printing instructions/ }).click();
+  const report = JSON.parse((await bytes(await reportPending)).toString("utf8"));
+  expect(report.straightened).toBe(true);
+  expect(report.straightening.correctedEyeLineDegrees).toBeCloseTo(suggested, 5);
+  expect(report.straightening.pixels).toEqual({ width: 1800, height: 2200 });
+  expect(report.straightening.changedRegion.width).toBeLessThan(1800);
+  expect(report.straightening.changedRegion.y + report.straightening.changedRegion.height).toBeLessThan(2200);
+  expect(report.processingOrder[1]).toBe("Optional head-only straightening");
+  // Normal passport framing leaves little headroom: a few plain edge pixels are extended and disclosed.
+  expect(report.straightening.edgeExtension.filledPixels).toBeGreaterThan(0);
+  expect(report.straightening.edgeExtension.maxPixels).toBeLessThanOrEqual(40);
+  expect(report.editingPolicy).toContain("NOT established");
+  await page.getByRole("button", { name: "Use unrotated original", exact: true }).click();
+  await expect(page.getByText("1800 x 2200 source pixels. Your original stays unchanged.", { exact: true })).toBeVisible();
+  await expect(page.locator(".output-card")).toHaveCount(0);
+  await expect(page.locator(".review-list input:checked")).toHaveCount(0);
+  await expect(page.getByTestId("eye-line-angle")).toContainText(`original: ${measured.toFixed(1)} degrees`);
+  await slider.fill(String(suggested));
+  await apply.click();
+  await expect(page.getByText("(straightened copy)", { exact: false })).toBeVisible();
+  await page.getByRole("button", { name: "Reset all adjustments", exact: true }).click();
+  await expect(page.getByText("1800 x 2200 source pixels. Your original stays unchanged.", { exact: true })).toBeVisible();
+  // Global reset clears manual eye markers, so the panel is no longer auto-expanded by a measured tilt.
+  await page.getByText("Optional: straighten a tilted head", { exact: false }).click();
+  await expect(consent).not.toBeChecked();
+  await expect(slider).toHaveValue("0");
+  await markEyes(page);
+  await consent.check();
+  await slider.fill("-4");
+  await apply.click();
+  await expect(page.getByText("Head straightened by -4.0 degrees.", { exact: false })).toBeVisible();
+  await consent.uncheck();
+  await expect(page.getByText("1800 x 2200 source pixels. Your original stays unchanged.", { exact: true })).toBeVisible();
+  expect(requests).toEqual([]);
+  expect(errors).toEqual([]);
+  expect(await page.evaluate(() => ({ local: localStorage.length, session: sessionStorage.length }))).toEqual({ local: 0, session: 0 });
+});
+
+test("head straightening refuses to extend a textured photo edge", async ({ page }) => {
+  await openWorkspace(page);
+  const base64 = await page.evaluate(() => {
+    const canvas = document.createElement("canvas"); canvas.width = 1800; canvas.height = 2200;
+    const ctx = canvas.getContext("2d")!;
+    ctx.fillStyle = "#e8e8e8"; ctx.fillRect(0, 0, 1800, 2200);
+    // A busy pattern along the top edge, where the fade zone needs pixels from beyond the photo.
+    for (let y = 0; y < 90; y += 12) for (let x = 0; x < 1800; x += 12) { ctx.fillStyle = (x + y) % 24 ? "#202020" : "#f0f0f0"; ctx.fillRect(x, y, 12, 12); }
+    ctx.fillStyle = "#b98257"; ctx.beginPath(); ctx.ellipse(900, 836, 396, 550, 0, 0, Math.PI * 2); ctx.fill();
+    return canvas.toDataURL("image/png").split(",")[1];
+  });
+  await page.locator("#photo-upload").setInputFiles({ name: "synthetic-test-only.png", mimeType: "image/png", buffer: Buffer.from(base64, "base64") });
+  await markHead(page);
+  await page.getByRole("button", { name: "Mark both eyes", exact: true }).click();
+  const image = page.getByRole("img", { name: "Full original for face selection and head marking", exact: true });
+  const bounds = (await image.boundingBox())!;
+  await image.click({ position: { x: bounds.width * 0.41, y: bounds.height * 0.35 } });
+  await image.click({ position: { x: bounds.width * 0.59, y: bounds.height * 0.37 } });
+  await page.getByRole("checkbox", { name: /I understand head straightening alters the photo/ }).check();
+  await page.getByRole("button", { name: "Apply straightening", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("not plain background");
+  await expect(page.getByText("1800 x 2200 source pixels. Your original stays unchanged.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Head straightening is active.", { exact: false })).toHaveCount(0);
+});
+
 test("all three downloads have exact dimensions, density, portal bytes, and no processing network/storage", async ({ page, context }) => {
   const consoleErrors: string[] = [];
   page.on("pageerror", error => consoleErrors.push(error.message));
